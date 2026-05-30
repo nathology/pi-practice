@@ -18,18 +18,39 @@ fi
 echo "⚙️ Upgrading core package management tools (pip, setuptools, wheel)..."
 "$HOME/voice_env/bin/pip" install --upgrade pip setuptools wheel
 
-# 3. Install Python project using pyproject.toml package links
+# 3. Handle Python package installation in editable mode via pyproject.toml
 if [ -f "pyproject.toml" ]; then
-    echo "📦 Compiling and installing project dependencies via pyproject.toml..."
-    # The dot tell pip to read the pyproject.toml file in the current working directory
+    echo "📦 Compiling and installing project dependencies in EDITABLE mode..."
     "$HOME/voice_env/bin/pip" install -e .
-    echo "✅ Pyproject package dependencies compiled and installed successfully."
+    echo "✅ Pyproject package dependencies compiled and linked successfully."
 else
     echo "❌ Error: pyproject.toml not found in the current folder. Cannot verify dependencies."
     exit 1
 fi
 
-# 4. Prompt for system hardware configuration adjustments
+# 4. Inject System LGPIO Bindings into the Virtual Environment
+echo "🔗 Injecting native lgpio architecture hooks into virtual environment..."
+VENV_PACKAGES="$HOME/voice_env/lib/python3.13/site-packages"
+
+# Symlink the main Python wrapper module if not already present
+if [ ! -f "$VENV_PACKAGES/lgpio.py" ]; then
+    ln -s /usr/lib/python3/dist-packages/lgpio.py "$VENV_PACKAGES/"
+    echo "   -> Linked lgpio.py core wrapper"
+fi
+
+# Locate and dynamically symlink the architecture-specific shared C-library object
+SYS_SO_FILE=$(ls /usr/lib/python3/dist-packages/_lgpio.cpython-313-*.so 2>/dev/null || true)
+if [ -n "$SYS_SO_FILE" ]; then
+    SO_FILENAME=$(basename "$SYS_SO_FILE")
+    if [ ! -f "$VENV_PACKAGES/$SO_FILENAME" ]; then
+        ln -s "$SYS_SO_FILE" "$VENV_PACKAGES/"
+        echo "   -> Linked hardware binary: $SO_FILENAME"
+    fi
+else
+    echo "⚠️ Warning: Native system _lgpio binary object not found. Hardware edge detection may fail."
+fi
+
+# 5. Prompt for system hardware configuration adjustments
 echo ""
 echo "--------------------------------------------------------"
 echo "🛠️ Hardware Configuration Options"
@@ -53,14 +74,11 @@ EOF'
     fi
 fi
 
-# noahfitz@the-pi-of-pi:~/repo/pi-practice $ git config --global user.email "nate.fitzgerald@gmail.com"
-# noahfitz@the-pi-of-pi:~/repo/pi-practice $ git config --global user.name "Nathan Fitzgerald"
-
 echo ""
 echo "--------------------------------------------------------"
 echo "🎉 Setup Script Execution Complete!"
 echo "--------------------------------------------------------"
-echo "To test your OLED screen panel using your virtual environment, run:"
-echo "sudo ~/voice_env/bin/python oled_hello.py"
+echo "Everything is primed. You can now run diagnostics completely WITHOUT sudo:"
+echo "python oled_hello.py"
+echo "python button_test.py"
 echo ""
-

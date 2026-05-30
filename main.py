@@ -128,15 +128,15 @@ class GameEngine:
         if self.mode == "STUDY":
             self.mode = "TEST"
             self.test_attempts = []
-            self.first_fail_index = None  # Reset tracking container for the new session
+            self.first_fail_index = None  
             self.test_target_offset = self.study_index + self.WINDOW_SIZE
             print(f"🚀 Entering TEST Mode. Target offset starting index: {self.test_target_offset}")
         elif self.mode == "TEST":
             self.mode = "STUDY"
-            # If a mistake occurred during the test, automatically position the view on it
+            # If a mistake occurred, align the Study window with the test block's starting point
             if self.first_fail_index is not None:
-                print(f"👈 Test exited. Snapping Study window to first mistake at index: {self.first_fail_index}")
-                self.study_index = self.first_fail_index
+                print(f"👈 Test exited. Aligning Study window to test baseline offset: {self.test_target_offset}")
+                self.study_index = self.test_target_offset
             else:
                 print("👈 Test exited perfectly with no errors.")
             
@@ -158,7 +158,6 @@ class GameEngine:
                 self.test_attempts.append((".", is_correct))
                 self.needs_refresh = True
                 
-                # If incorrect, lock the position of the first error
                 if not is_correct and self.first_fail_index is None:
                     self.first_fail_index = current_test_idx
                     
@@ -173,7 +172,6 @@ class GameEngine:
                 self.test_attempts.append((digit, is_correct))
                 self.needs_refresh = True
                 
-                # If incorrect, lock the position of the first error
                 if not is_correct and self.first_fail_index is None:
                     self.first_fail_index = current_test_idx
 
@@ -188,7 +186,8 @@ class GameEngine:
             elif self.mode == "STUDY":
                 draw.text((1, 0), "STUDY MODE", fill="white")
                 
-                memorized_count = max(0, self.study_index)
+                # Digit calculation tracking the right edge view index limit
+                memorized_count = self.study_index + self.WINDOW_SIZE
                 draw.text((72, 0), f"Digits: {memorized_count}", fill="white")
                 draw.line((0, 11, 127, 11), fill="white")
                 

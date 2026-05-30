@@ -16,7 +16,8 @@ sudo apt update && sudo apt install -y \
   libopenjp2-7-dev \
   libtiff-dev \
   libportaudio2 \
-  alsa-utils
+  alsa-utils \
+  python3-lgpio
 
 ```
 
@@ -53,5 +54,5 @@ sudo reboot
 Try a hello world on the screen
 
 '''bash
-sudo -E ~/voice_env/bin/python oled_hello.py
+~/voice_env/bin/python oled_hello.py
 '''

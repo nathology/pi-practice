@@ -36,19 +36,20 @@ class GameEngine:
         )
         
         # 2. Layout Configuration Adjustments
-        self.WINDOW_SIZE = 20          # Expand viewing deck to 20 digits to fill screen
-        self.MIN_INDEX = -20           # Allows scrolling left until the screen is completely clear
+        self.WINDOW_SIZE = 20          # Base target digit slot width
+        self.MIN_INDEX = -20           # Fully clear screen margin bounds
         self.MAX_INDEX = len(self.pi_digits) - self.WINDOW_SIZE
         
         # State Machine Variables
         self.mode = "SPLASH"           # Modes: SPLASH, STUDY, TEST
-        self.study_index = 0           # Starts tracking normally at index 0
+        self.study_index = 0           # Active operational pointer index tracking
         self.needs_refresh = True
         self.running = True
         
-        # Test mode tracking structures: list of tuples -> (digit_char, is_correct)
+        # Test mode tracking structures
         self.test_attempts = []
         self.test_target_offset = 0
+        self.first_fail_index = None   # Tracks the absolute index of Noah's first mistake
         
         # Dictionary converting spoken words to string characters
         self.word_map = {
@@ -77,7 +78,6 @@ class GameEngine:
             print(f"❌ Screen Init Failure: {e}")
             sys.exit(1)
 
-        # Draw splash screen instantly while loading the heavy Vosk language model
         self.render_display()
 
         # 5. Initialize Offline Audio Recognition Architecture
@@ -93,11 +93,24 @@ class GameEngine:
         self.mode = "STUDY"
         self.needs_refresh = True
 
+    def get_view_string(self, start_idx):
+        """Generates visual layouts inserting decimal points contextually without shifting data indices."""
+        if start_idx < 0:
+            blank_slots = abs(start_idx)
+            s = " " * blank_slots + self.pi_digits[0 : self.WINDOW_SIZE - blank_slots]
+        else:
+            s = self.pi_digits[start_idx : start_idx + self.WINDOW_SIZE]
+            
+        # If the leading '3' (index 0 of Pi) falls within the window context, inject the dot
+        if start_idx <= 0:
+            pos = abs(start_idx)
+            s = s[:pos+1] + "." + s[pos+1:]
+        return s
+
     def handle_left(self):
         """Fires when Left Button drops down."""
         if self.mode != "STUDY":
             return
-        
         step = self.WINDOW_SIZE if self.btn_menu.is_pressed else 1
         self.study_index = max(self.MIN_INDEX, self.study_index - step)
         self.needs_refresh = True
@@ -106,43 +119,49 @@ class GameEngine:
         """Fires when Right Button drops down."""
         if self.mode != "STUDY":
             return
-            
         step = self.WINDOW_SIZE if self.btn_menu.is_pressed else 1
         self.study_index = min(self.MAX_INDEX, self.study_index + step)
         self.needs_refresh = True
 
     def handle_menu_long_press(self):
-        """Fires exclusively when the center menu key passes the 1.5s threshold."""
+        """Fires when center menu key passes 1.5s threshold."""
         if self.mode == "STUDY":
             self.mode = "TEST"
             self.test_attempts = []
+            self.first_fail_index = None  # Reset tracking container for the new session
             self.test_target_offset = self.study_index + self.WINDOW_SIZE
-            print(f"🚀 Switching to TEST Mode. Target digit index starts at: {self.test_target_offset}")
+            print(f"🚀 Entering TEST Mode. Target offset starting index: {self.test_target_offset}")
         elif self.mode == "TEST":
             self.mode = "STUDY"
-            print("👈 Returning to STUDY Mode.")
+            # If a mistake occurred during the test, automatically position the view on it
+            if self.first_fail_index is not None:
+                print(f"👈 Test exited. Snapping Study window to first mistake at index: {self.first_fail_index}")
+                self.study_index = self.first_fail_index
+            else:
+                print("👈 Test exited perfectly with no errors.")
             
         self.needs_refresh = True
 
     def process_voice_input(self, text_chunk):
-        """Tokenizes speech segments and scores accuracy against the target array."""
+        """Tokenizes speech segments and scores accuracy against target array."""
         words = text_chunk.split()
         for word in words:
-            # Dynamically calculate current position by counting numeric entries only
+            # Dynamically look up current testing index by filtering out decimal character items
             actual_digits_attempted = sum(1 for char, _ in self.test_attempts if char != '.')
             current_test_idx = self.test_target_offset + actual_digits_attempted
             
             if current_test_idx >= len(self.pi_digits):
                 break
 
-            # Handle the optional spoken decimal point
             if word == "point":
-                # Correct only if Noah just finished the first digit ("3")
                 is_correct = (current_test_idx == 1)
                 self.test_attempts.append((".", is_correct))
                 self.needs_refresh = True
                 
-            # Handle standard numerical inputs
+                # If incorrect, lock the position of the first error
+                if not is_correct and self.first_fail_index is None:
+                    self.first_fail_index = current_test_idx
+                    
             elif word in self.word_map:
                 if current_test_idx < 0:
                     continue
@@ -153,6 +172,10 @@ class GameEngine:
                 
                 self.test_attempts.append((digit, is_correct))
                 self.needs_refresh = True
+                
+                # If incorrect, lock the position of the first error
+                if not is_correct and self.first_fail_index is None:
+                    self.first_fail_index = current_test_idx
 
     def render_display(self):
         """Clears canvas buffers and drafts UI assets onto glass matrix geometry."""
@@ -163,50 +186,39 @@ class GameEngine:
                 draw.text((20, 38), "🤖 Loading Vosk...", fill="white")
                 
             elif self.mode == "STUDY":
-                draw.text((0, 0), "STUDY MODE", fill="white")
-                display_idx = max(0, self.study_index)
-                range_str = f"Idx: {display_idx}"
-                draw.text((80, 0), range_str, fill="white")
+                draw.text((1, 0), "STUDY MODE", fill="white")
+                
+                memorized_count = max(0, self.study_index)
+                draw.text((72, 0), f"Digits: {memorized_count}", fill="white")
                 draw.line((0, 11, 127, 11), fill="white")
                 
-                if self.study_index < 0:
-                    blank_slots = abs(self.study_index)
-                    visible_digits = " " * blank_slots + self.pi_digits[0 : self.WINDOW_SIZE - blank_slots]
-                else:
-                    visible_digits = self.pi_digits[self.study_index : self.study_index + self.WINDOW_SIZE]
-                
-                draw.text((4, 28), visible_digits, fill="white")
+                view_str = self.get_view_string(self.study_index)
+                draw.text((2, 28), view_str, fill="white")
                 
             elif self.mode == "TEST":
-                draw.text((0, 0), "TEST MODE", fill="white")
+                draw.text((1, 0), "TEST MODE", fill="white")
                 draw.line((0, 11, 127, 11), fill="white")
                 
-                if self.study_index < 0:
-                    blank_slots = abs(self.study_index)
-                    base_digits = " " * blank_slots + self.pi_digits[0 : self.WINDOW_SIZE - blank_slots]
-                else:
-                    base_digits = self.pi_digits[self.study_index : self.study_index + self.WINDOW_SIZE]
+                base_str = self.get_view_string(self.study_index)
+                draw.text((2, 16), base_str, fill="white")
+                draw.line((0, 29, 127, 29), fill="white")
                 
-                draw.text((4, 18), base_digits, fill="white")
-                draw.line((4, 30, 123, 30), fill="white") 
-                
-                # Slide the viewing window if characters exceed display limits
                 total_attempts = len(self.test_attempts)
-                if total_attempts <= self.WINDOW_SIZE:
+                max_visible = self.WINDOW_SIZE + 1
+                if total_attempts <= max_visible:
                     visible_slice = self.test_attempts
                 else:
-                    visible_slice = self.test_attempts[-self.WINDOW_SIZE:]
+                    visible_slice = self.test_attempts[-max_visible:]
                     
-                start_x = 4
+                start_x = 2
                 char_width = 6
-                y_pos = 40
+                y_pos = 38
                 
                 for i, (char, is_correct) in enumerate(visible_slice):
                     cur_x = start_x + (i * char_width)
                     draw.text((cur_x, y_pos), char, fill="white")
                     
                     if not is_correct:
-                        # Draw strikeout X directly over the failed entry
                         draw.line((cur_x, y_pos, cur_x + 4, y_pos + 8), fill="white")
                         draw.line((cur_x + 4, y_pos, cur_x, y_pos + 8), fill="white")
 

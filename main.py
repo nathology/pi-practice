@@ -48,11 +48,9 @@ class GameEngine:
         
         # Test mode tracking structures
         self.test_attempts = {}        # Maps absolute_index -> (digit_char, is_correct)
-        self.test_target_offset = 0
         self.first_fail_index = None   # Tracks the absolute index of Noah's first mistake
         self.test_point_spoken = False
         self.test_point_correct = False
-        self.test_point_idx = None
         
         # Dictionary converting spoken words to string characters
         self.word_map = {
@@ -116,18 +114,15 @@ class GameEngine:
         """Fires when center menu key passes 1.5s threshold."""
         if self.mode == "STUDY":
             self.mode = "TEST"
-            self.test_attempts = {}       # Reset session dictionary
+            self.test_attempts = {}       # Reset tracking variables for fresh test run
             self.test_point_spoken = False
             self.test_point_correct = False
-            self.test_point_idx = None
             self.first_fail_index = None  
-            self.test_target_offset = self.study_index + self.WINDOW_SIZE
-            print(f"🚀 Entering TEST Mode. Target offset starting index: {self.test_target_offset}")
+            print(f"🚀 Entering TEST Mode at digit index: {self.study_index + self.WINDOW_SIZE}")
         elif self.mode == "TEST":
             self.mode = "STUDY"
-            # CRITICAL FIX: self.study_index is left completely untouched. 
-            # The counter and position remain physically identical.
-            print("👈 Test exited. Preserving screen alignment and cumulative digit index.")
+            # PERFECT PARITY: index and counters are preserved identically
+            print("👈 Test exited. Keeping matching alignment frames.")
             
         self.needs_refresh = True
 
@@ -141,8 +136,8 @@ class GameEngine:
             if self.first_fail_index is not None:
                 break
 
-            actual_digits_attempted = len(self.test_attempts)
-            current_test_idx = self.test_target_offset + actual_digits_attempted
+            # The target digit required is ALWAYS the one entering the right boundary edge
+            current_test_idx = self.study_index + self.WINDOW_SIZE
             
             if current_test_idx >= len(self.pi_digits):
                 break
@@ -151,12 +146,12 @@ class GameEngine:
                 is_correct = (current_test_idx == 1)
                 self.test_point_spoken = True
                 self.test_point_correct = is_correct
+                self.test_attempts[current_test_idx] = (".", is_correct)
                 self.needs_refresh = True
                 
                 if not is_correct:
-                    self.test_point_idx = current_test_idx
                     self.first_fail_index = current_test_idx
-                    print(f"⚠️ Decimal mistake caught at index {current_test_idx}. Pausing Test loop.")
+                    self.study_index += 1 # Advance so the wrong dot slides onto the display row
                     break
                     
             elif word in self.word_map:
@@ -167,12 +162,17 @@ class GameEngine:
                 expected_digit = self.pi_digits[current_test_idx]
                 is_correct = (digit == expected_digit)
                 
+                # Cache user attempts by their unique absolute positions
                 self.test_attempts[current_test_idx] = (digit, is_correct)
                 self.needs_refresh = True
                 
-                if not is_correct:
+                if is_correct:
+                    # Advance view index instantly! Updates counter and typewrites text leftward
+                    self.study_index += 1
+                else:
                     self.first_fail_index = current_test_idx
-                    print(f"⚠️ Digit mistake '{digit}' caught at index {current_test_idx}. Pausing Test loop.")
+                    # Advance index once so the failure digit slides directly into the visible right slot
+                    self.study_index += 1
                     break
 
     def render_display(self):
@@ -204,7 +204,7 @@ class GameEngine:
                 draw_x_overlay = False
                 show_dot = False
                 
-                # Format decimal tracking contextually based on absolute index 0 ('3')
+                # Contextual decimal point rendering rules
                 if abs_idx == 0:
                     if self.mode == "STUDY":
                         show_dot = True
@@ -213,31 +213,23 @@ class GameEngine:
                 
                 if 0 <= abs_idx < len(self.pi_digits):
                     if self.mode == "STUDY":
-                        # If a failure mask is active, hide upcoming characters completely
-                        if self.first_fail_index is not None and abs_idx > self.first_fail_index:
-                            char_to_draw = " "
-                        else:
-                            char_to_draw = self.pi_digits[abs_idx]
-                            
+                        char_to_draw = self.pi_digits[abs_idx]
                     elif self.mode == "TEST":
-                        # Only reveal slots Noah has explicitly attempted so far
+                        # Pull items dynamically from session attempts history
                         if abs_idx in self.test_attempts:
                             char_to_draw, is_correct = self.test_attempts[abs_idx]
                             if not is_correct:
                                 draw_x_overlay = True
-                        
-                        # Handle incorrect standalone decimal point rendering rules
-                        if self.test_point_spoken and not self.test_point_correct and self.test_point_idx == abs_idx:
-                            char_to_draw = "."
-                            draw_x_overlay = True
+                        elif abs_idx < (self.study_index + self.WINDOW_SIZE):
+                            # Anything behind the right edge target was cleared successfully
+                            char_to_draw = self.pi_digits[abs_idx]
                 
-                # Execute pixel-level grid rendering calculations
+                # Output calculated character frames onto the display plane
                 cur_x = start_x + (i * char_width)
                 if char_to_draw != " ":
                     draw.text((cur_x, y_pos), char_to_draw, fill="white")
                 
                 if show_dot:
-                    # Draw decimal dot right between slots without triggering horizontal shifts
                     draw.text((cur_x + 4, y_pos), ".", fill="white")
                     
                 if draw_x_overlay:

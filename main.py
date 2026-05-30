@@ -93,22 +93,30 @@ class GameEngine:
         self.mode = "STUDY"
         self.needs_refresh = True
 
-    def get_view_string(self, start_idx):
-        """Generates visual layouts inserting decimal points contextually without shifting data indices."""
-        if start_idx < 0:
-            blank_slots = abs(start_idx)
-            s = " " * blank_slots + self.pi_digits[0 : self.WINDOW_SIZE - blank_slots]
-        else:
-            s = self.pi_digits[start_idx : start_idx + self.WINDOW_SIZE]
-            
-        # If the leading '3' (index 0 of Pi) falls within the window context, inject the dot
-        if start_idx <= 0:
-            pos = abs(start_idx)
-            s = s[:pos+1] + "." + s[pos+1:]
+    def get_view_string(self, start_idx, mask_past_fail=True):
+        """Generates visual layouts inserting decimal points contextually with failure masking."""
+        s = ""
+        for i in range(self.WINDOW_SIZE):
+            abs_idx = start_idx + i
+            if abs_idx < 0 or abs_idx >= len(self.pi_digits):
+                s += " "
+            # If reviewing a mistake, blank out any upcoming digits past the failure point
+            elif mask_past_fail and self.first_fail_index is not None and abs_idx > self.first_fail_index:
+                s += " "
+            else:
+                s += self.pi_digits[abs_idx]
+                
+        # Contextually inject the decimal point right next to the '3' (absolute index 0)
+        slot_of_three = -start_idx
+        if 0 <= slot_of_three < len(s) and s[slot_of_three] == "3":
+            s = s[:slot_of_three + 1] + "." + s[slot_of_three + 1:]
         return s
 
     def handle_left(self):
         """Fires when Left Button drops down."""
+        # Moving explicitly lifts any active failure study masks
+        self.first_fail_index = None
+        
         if self.mode != "STUDY":
             return
         step = self.WINDOW_SIZE if self.btn_menu.is_pressed else 1
@@ -117,6 +125,9 @@ class GameEngine:
 
     def handle_right(self):
         """Fires when Right Button drops down."""
+        # Moving explicitly lifts any active failure study masks
+        self.first_fail_index = None
+        
         if self.mode != "STUDY":
             return
         step = self.WINDOW_SIZE if self.btn_menu.is_pressed else 1
@@ -133,7 +144,6 @@ class GameEngine:
             print(f"🚀 Entering TEST Mode. Target offset starting index: {self.test_target_offset}")
         elif self.mode == "TEST":
             self.mode = "STUDY"
-            # If a mistake occurred, align the Study window with the test block's starting point
             if self.first_fail_index is not None:
                 print(f"👈 Test exited. Aligning Study window to test baseline offset: {self.test_target_offset}")
                 self.study_index = self.test_target_offset
@@ -149,7 +159,6 @@ class GameEngine:
 
         words = text_chunk.split()
         for word in words:
-            # Double check inside the slice processing loop to handle multi-word text packages safely
             if self.first_fail_index is not None:
                 break
 
@@ -166,7 +175,6 @@ class GameEngine:
                 
                 if not is_correct:
                     self.first_fail_index = current_test_idx
-                    print(f"⚠️ Decimal mistake caught at index {current_test_idx}. Pausing Test loop.")
                     break
                     
             elif word in self.word_map:
@@ -182,7 +190,6 @@ class GameEngine:
                 
                 if not is_correct:
                     self.first_fail_index = current_test_idx
-                    print(f"⚠️ Digit mistake '{digit}' caught at index {current_test_idx}. Pausing Test loop.")
                     break
 
     def render_display(self):
@@ -196,18 +203,21 @@ class GameEngine:
             elif self.mode == "STUDY":
                 draw.text((1, 0), "STUDY MODE", fill="white")
                 
+                # Digit tracking reflects exactly how many characters have scrolled past the right edge
                 memorized_count = self.study_index + self.WINDOW_SIZE
-                draw.text((72, 0), f"Digits: {memorized_count}", fill="white")
+                draw.text((72, 0), f"Digits: {max(0, memorized_count)}", fill="white")
                 draw.line((0, 11, 127, 11), fill="white")
                 
-                view_str = self.get_view_string(self.study_index)
+                # Mask future items if coming off a test error
+                view_str = self.get_view_string(self.study_index, mask_past_fail=True)
                 draw.text((2, 28), view_str, fill="white")
                 
             elif self.mode == "TEST":
                 draw.text((1, 0), "TEST MODE", fill="white")
                 draw.line((0, 11, 127, 11), fill="white")
                 
-                base_str = self.get_view_string(self.study_index)
+                # The reference line always displays the full target segment uncensored
+                base_str = self.get_view_string(self.study_index, mask_past_fail=False)
                 draw.text((2, 16), base_str, fill="white")
                 draw.line((0, 29, 127, 29), fill="white")
                 
@@ -241,7 +251,6 @@ class GameEngine:
             while self.running:
                 try:
                     audio_data = audio_queue.get_nowait()
-                    # Only decode audio blocks if in Test Mode AND no mistakes have landed yet
                     if self.mode == "TEST" and self.first_fail_index is None:
                         if self.recognizer.AcceptWaveform(audio_data):
                             res = json.loads(self.recognizer.Result())

@@ -39,31 +39,26 @@ def main():
         if status:
             print(f"⚠️ Audio Hardware Status Flag: {status}", file=sys.stderr)
             
-        # 1. Convert the raw buffer into a 2D numpy matrix [frames, 2 channels]
-        audio_data = np.frombuffer(indata, dtype=np.int16).reshape(-1, 2)
+        # 1. Cast the raw buffer into a flat 1D array of 16-bit integers
+        raw_samples = np.frombuffer(indata, dtype=np.int16)
         
-        # 2. Extract Channel 0 (Left channel data)
-        left_channel = audio_data[:, 0]
+        # 2. De-interleave the channels instantly:
+        # Since it's stereo, even indices [0, 2, 4...] are Left channel data.
+        left_channel = raw_samples[0::2]
         
-        # 3. Mathematically downsample from 48000Hz down to 16000Hz (Exactly a 3:1 factor reduction)
-        duration = len(left_channel) / HW_RATE
-        num_target_samples = int(duration * VOSK_RATE)
+        # 3. Downsample from 48kHz to 16kHz by pulling every 3rd sample.
+        # This is blazingly fast and keeps memory alignments completely static.
+        downsampled_data = left_channel[0::3]
         
-        src_indices = np.arange(len(left_channel))
-        target_indices = np.linspace(0, len(left_channel) - 1, num_target_samples)
-        
-        # Interpolate the signal array density cleanly
-        downsampled_data = np.interp(target_indices, src_indices, left_channel).astype(np.int16)
-        
-        # 4. Hand the downsampled 16kHz mono chunk to Vosk
+        # 4. Hand the mono 16kHz chunk to Vosk
         recognizer.AcceptWaveform(downsampled_data.tobytes())
 
     try:
         # Open hardware stream at 48000Hz, stereo (channels=2)
-        # blocksize=6000 cuts perfectly divisible slices out of a 48kHz flow
+        # blocksize=4800 captures exactly 100ms chunks, avoiding thread lag
         with sd.RawInputStream(device=0,
                                samplerate=HW_RATE, 
-                               blocksize=6000, 
+                               blocksize=4800, 
                                dtype='int16', 
                                channels=2, 
                                callback=audio_callback):
@@ -76,7 +71,7 @@ def main():
                     if text:
                         print(f"👂 Heard phrase: \033[1;32m{text}\033[0m")
                         
-                sd.sleep(100)
+                sd.sleep(40) # Keep looping tightly to empty the Vosk queue
                 
     except KeyboardInterrupt:
         print("\n\n🧹 Closing audio capture lane. Hardware stream released.")

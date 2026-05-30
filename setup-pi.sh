@@ -91,17 +91,20 @@ EOF'
     fi
 
     # B. Check and apply I2S microphone bus configuration
-    if ! grep -q "dtoverlay=rpi-i2s-audio" /boot/firmware/config.txt; then
-        echo "   -> Injecting I2S generic microphone bus driver overlays..."
+    if ! grep -q "dtoverlay=googlevoicehat-soundcard" /boot/firmware/config.txt; then
+        echo "   -> Injecting I2S standard microphone soundcard overlays..."
+        # Safely remove the legacy rpi-i2s-audio if it exists to clean up files
+        sudo sed -i '/dtoverlay=rpi-i2s-audio/d' /boot/firmware/config.txt
+        
         sudo bash -c 'cat << EOF >> /boot/firmware/config.txt
 
 # --- Added by Pi-Practice Audio Automation ---
 dtparam=i2s=on
-dtoverlay=rpi-i2s-audio
+dtoverlay=googlevoicehat-soundcard
 EOF'
         NEEDS_REBOOT=true
     else
-        echo "ℹ️ I2S microphone hardware overlay already present. Skipping..."
+        echo "ℹ️ I2S soundcard overlay already present. Skipping..."
     fi
 
     # C. Handle final messaging conditional on what changed

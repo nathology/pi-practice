@@ -40,6 +40,7 @@ git pull
 Now that we have cloned the repo, let's run the setup script contained there
 
 '''bash
+chmod +x setup-pi.sh
 source setup-pi.sh
 '''
 

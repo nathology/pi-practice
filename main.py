@@ -144,9 +144,15 @@ class GameEngine:
 
     def process_voice_input(self, text_chunk):
         """Tokenizes speech segments and scores accuracy against target array."""
+        if self.first_fail_index is not None:
+            return
+
         words = text_chunk.split()
         for word in words:
-            # Dynamically look up current testing index by filtering out decimal character items
+            # Double check inside the slice processing loop to handle multi-word text packages safely
+            if self.first_fail_index is not None:
+                break
+
             actual_digits_attempted = sum(1 for char, _ in self.test_attempts if char != '.')
             current_test_idx = self.test_target_offset + actual_digits_attempted
             
@@ -158,8 +164,10 @@ class GameEngine:
                 self.test_attempts.append((".", is_correct))
                 self.needs_refresh = True
                 
-                if not is_correct and self.first_fail_index is None:
+                if not is_correct:
                     self.first_fail_index = current_test_idx
+                    print(f"⚠️ Decimal mistake caught at index {current_test_idx}. Pausing Test loop.")
+                    break
                     
             elif word in self.word_map:
                 if current_test_idx < 0:
@@ -172,8 +180,10 @@ class GameEngine:
                 self.test_attempts.append((digit, is_correct))
                 self.needs_refresh = True
                 
-                if not is_correct and self.first_fail_index is None:
+                if not is_correct:
                     self.first_fail_index = current_test_idx
+                    print(f"⚠️ Digit mistake '{digit}' caught at index {current_test_idx}. Pausing Test loop.")
+                    break
 
     def render_display(self):
         """Clears canvas buffers and drafts UI assets onto glass matrix geometry."""
@@ -186,7 +196,6 @@ class GameEngine:
             elif self.mode == "STUDY":
                 draw.text((1, 0), "STUDY MODE", fill="white")
                 
-                # Digit calculation tracking the right edge view index limit
                 memorized_count = self.study_index + self.WINDOW_SIZE
                 draw.text((72, 0), f"Digits: {memorized_count}", fill="white")
                 draw.line((0, 11, 127, 11), fill="white")
@@ -232,7 +241,8 @@ class GameEngine:
             while self.running:
                 try:
                     audio_data = audio_queue.get_nowait()
-                    if self.mode == "TEST":
+                    # Only decode audio blocks if in Test Mode AND no mistakes have landed yet
+                    if self.mode == "TEST" and self.first_fail_index is None:
                         if self.recognizer.AcceptWaveform(audio_data):
                             res = json.loads(self.recognizer.Result())
                             text = res.get("text", "")

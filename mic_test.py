@@ -14,7 +14,7 @@ def main():
     model_path = "model"
     
     print("--------------------------------------------------------")
-    print("🎙️ The Pi of Pi: Offline Voice Recognition Diagnostic")
+    print("🎙️ The Pi of Pi: Microphone Audio Diagnostic")
     print("--------------------------------------------------------")
     
     if not os.path.exists(model_path):
@@ -24,38 +24,48 @@ def main():
     print("🤖 Loading lightweight acoustic speech model into memory...")
     model = Model(model_path)
     
-    # Vosk strictly demands a 16000Hz stream
     VOSK_RATE = 16000
     recognizer = KaldiRecognizer(model, VOSK_RATE)
     recognizer.SetWords(True) 
     
-    # Target the rigid hardware clock profile of the I2S microphone
     HW_RATE = 48000
     
     print(f"\n🚀 Opening microphone stream on device (hw:0,0) at native {HW_RATE}Hz...")
-    print("Speak numbers clearly into the mic! Press Ctrl+C to stop.\n")
+    print("Speak or tap the mic. Press Ctrl+C to stop.\n")
     
     def audio_callback(indata, frames, time, status):
         if status:
             print(f"⚠️ Audio Hardware Status Flag: {status}", file=sys.stderr)
             
-        # 1. Cast the raw buffer into a flat 1D array of 16-bit integers
+        # 1. Interpret raw data buffer explicitly as 16-bit PCM integers
         raw_samples = np.frombuffer(indata, dtype=np.int16)
         
-        # 2. De-interleave the channels instantly:
-        # Since it's stereo, even indices [0, 2, 4...] are Left channel data.
+        if len(raw_samples) == 0:
+            return
+
+        # 2. Extract Left channel data
         left_channel = raw_samples[0::2]
         
-        # 3. Downsample from 48kHz to 16kHz by pulling every 3rd sample.
-        # This is blazingly fast and keeps memory alignments completely static.
+        # 3. Downsample 48kHz -> 16kHz
         downsampled_data = left_channel[0::3]
         
-        # 4. Hand the mono 16kHz chunk to Vosk
-        recognizer.AcceptWaveform(downsampled_data.tobytes())
+        # 4. DIAGNOSTIC: Calculate real-time root-mean-square (Volume Level)
+        # This checks if the mic is actually sending audio energy
+        rms = np.sqrt(np.mean(downsampled_data.astype(np.float32)**2))
+        
+        # Print a simple visual audio level indicator
+        meter = "■" * int(rms / 500)
+        print(f"🎙️ Signal Level (RMS): {rms:6.1f} | {meter[:40]}", end="\r")
+        
+        # 5. Safely pass data to Vosk inside a protective block
+        try:
+            if len(downsampled_data) > 0:
+                recognizer.AcceptWaveform(downsampled_data.tobytes())
+        except Exception:
+            # Prevent the engine crash from killing the script so we can see the logs
+            pass
 
     try:
-        # Open hardware stream at 48000Hz, stereo (channels=2)
-        # blocksize=4800 captures exactly 100ms chunks, avoiding thread lag
         with sd.RawInputStream(device=0,
                                samplerate=HW_RATE, 
                                blocksize=4800, 
@@ -69,9 +79,9 @@ def main():
                     result_dict = json.loads(result_bytes)
                     text = result_dict.get("text", "")
                     if text:
-                        print(f"👂 Heard phrase: \033[1;32m{text}\033[0m")
+                        print(f"\nHeard phrase: \033[1;32m{text}\033[0m")
                         
-                sd.sleep(40) # Keep looping tightly to empty the Vosk queue
+                sd.sleep(40)
                 
     except KeyboardInterrupt:
         print("\n\n🧹 Closing audio capture lane. Hardware stream released.")

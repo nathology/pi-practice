@@ -47,9 +47,12 @@ class GameEngine:
         self.running = True
         
         # Test mode tracking structures
-        self.test_attempts = []
+        self.test_attempts = {}        # Maps absolute_index -> (digit_char, is_correct)
         self.test_target_offset = 0
         self.first_fail_index = None   # Tracks the absolute index of Noah's first mistake
+        self.test_point_spoken = False
+        self.test_point_correct = False
+        self.test_point_idx = None
         
         # Dictionary converting spoken words to string characters
         self.word_map = {
@@ -93,30 +96,8 @@ class GameEngine:
         self.mode = "STUDY"
         self.needs_refresh = True
 
-    def get_view_string(self, start_idx, mask_past_fail=True):
-        """Generates visual layouts inserting decimal points contextually with failure masking."""
-        s = ""
-        for i in range(self.WINDOW_SIZE):
-            abs_idx = start_idx + i
-            if abs_idx < 0 or abs_idx >= len(self.pi_digits):
-                s += " "
-            # If reviewing a mistake, blank out any upcoming digits past the failure point
-            elif mask_past_fail and self.first_fail_index is not None and abs_idx > self.first_fail_index:
-                s += " "
-            else:
-                s += self.pi_digits[abs_idx]
-                
-        # Contextually inject the decimal point right next to the '3' (absolute index 0)
-        slot_of_three = -start_idx
-        if 0 <= slot_of_three < len(s) and s[slot_of_three] == "3":
-            s = s[:slot_of_three + 1] + "." + s[slot_of_three + 1:]
-        return s
-
     def handle_left(self):
         """Fires when Left Button drops down."""
-        # Moving explicitly lifts any active failure study masks
-        self.first_fail_index = None
-        
         if self.mode != "STUDY":
             return
         step = self.WINDOW_SIZE if self.btn_menu.is_pressed else 1
@@ -125,9 +106,6 @@ class GameEngine:
 
     def handle_right(self):
         """Fires when Right Button drops down."""
-        # Moving explicitly lifts any active failure study masks
-        self.first_fail_index = None
-        
         if self.mode != "STUDY":
             return
         step = self.WINDOW_SIZE if self.btn_menu.is_pressed else 1
@@ -138,17 +116,18 @@ class GameEngine:
         """Fires when center menu key passes 1.5s threshold."""
         if self.mode == "STUDY":
             self.mode = "TEST"
-            self.test_attempts = []
+            self.test_attempts = {}       # Reset session dictionary
+            self.test_point_spoken = False
+            self.test_point_correct = False
+            self.test_point_idx = None
             self.first_fail_index = None  
             self.test_target_offset = self.study_index + self.WINDOW_SIZE
             print(f"🚀 Entering TEST Mode. Target offset starting index: {self.test_target_offset}")
         elif self.mode == "TEST":
             self.mode = "STUDY"
-            if self.first_fail_index is not None:
-                print(f"👈 Test exited. Aligning Study window to test baseline offset: {self.test_target_offset}")
-                self.study_index = self.test_target_offset
-            else:
-                print("👈 Test exited perfectly with no errors.")
+            # CRITICAL FIX: self.study_index is left completely untouched. 
+            # The counter and position remain physically identical.
+            print("👈 Test exited. Preserving screen alignment and cumulative digit index.")
             
         self.needs_refresh = True
 
@@ -162,7 +141,7 @@ class GameEngine:
             if self.first_fail_index is not None:
                 break
 
-            actual_digits_attempted = sum(1 for char, _ in self.test_attempts if char != '.')
+            actual_digits_attempted = len(self.test_attempts)
             current_test_idx = self.test_target_offset + actual_digits_attempted
             
             if current_test_idx >= len(self.pi_digits):
@@ -170,11 +149,14 @@ class GameEngine:
 
             if word == "point":
                 is_correct = (current_test_idx == 1)
-                self.test_attempts.append((".", is_correct))
+                self.test_point_spoken = True
+                self.test_point_correct = is_correct
                 self.needs_refresh = True
                 
                 if not is_correct:
+                    self.test_point_idx = current_test_idx
                     self.first_fail_index = current_test_idx
+                    print(f"⚠️ Decimal mistake caught at index {current_test_idx}. Pausing Test loop.")
                     break
                     
             elif word in self.word_map:
@@ -185,11 +167,12 @@ class GameEngine:
                 expected_digit = self.pi_digits[current_test_idx]
                 is_correct = (digit == expected_digit)
                 
-                self.test_attempts.append((digit, is_correct))
+                self.test_attempts[current_test_idx] = (digit, is_correct)
                 self.needs_refresh = True
                 
                 if not is_correct:
                     self.first_fail_index = current_test_idx
+                    print(f"⚠️ Digit mistake '{digit}' caught at index {current_test_idx}. Pausing Test loop.")
                     break
 
     def render_display(self):
@@ -199,46 +182,67 @@ class GameEngine:
                 draw.rectangle((0, 0, 127, 63), outline="white", fill="black")
                 draw.text((24, 15), "THE PI OF PI", fill="white")
                 draw.text((20, 38), "🤖 Loading Vosk...", fill="white")
+                return
                 
-            elif self.mode == "STUDY":
-                draw.text((1, 0), "STUDY MODE", fill="white")
+            # 1. RENDER PARITY HEADER SECTION
+            mode_text = "STUDY MODE" if self.mode == "STUDY" else "TEST MODE"
+            draw.text((1, 0), mode_text, fill="white")
+            
+            # The cumulative digits count is identical in both execution branches
+            memorized_count = self.study_index + self.WINDOW_SIZE
+            draw.text((72, 0), f"Digits: {max(0, memorized_count)}", fill="white")
+            draw.line((0, 11, 127, 11), fill="white")
+            
+            # 2. UNIFIED GRID ROW ENGINE (y=28)
+            start_x = 4
+            char_width = 6
+            y_pos = 28
+            
+            for i in range(self.WINDOW_SIZE):
+                abs_idx = self.study_index + i
+                char_to_draw = " "
+                draw_x_overlay = False
+                show_dot = False
                 
-                # Digit tracking reflects exactly how many characters have scrolled past the right edge
-                memorized_count = self.study_index + self.WINDOW_SIZE
-                draw.text((72, 0), f"Digits: {max(0, memorized_count)}", fill="white")
-                draw.line((0, 11, 127, 11), fill="white")
+                # Format decimal tracking contextually based on absolute index 0 ('3')
+                if abs_idx == 0:
+                    if self.mode == "STUDY":
+                        show_dot = True
+                    elif self.mode == "TEST" and self.test_point_spoken and self.test_point_correct:
+                        show_dot = True
                 
-                # Mask future items if coming off a test error
-                view_str = self.get_view_string(self.study_index, mask_past_fail=True)
-                draw.text((2, 28), view_str, fill="white")
+                if 0 <= abs_idx < len(self.pi_digits):
+                    if self.mode == "STUDY":
+                        # If a failure mask is active, hide upcoming characters completely
+                        if self.first_fail_index is not None and abs_idx > self.first_fail_index:
+                            char_to_draw = " "
+                        else:
+                            char_to_draw = self.pi_digits[abs_idx]
+                            
+                    elif self.mode == "TEST":
+                        # Only reveal slots Noah has explicitly attempted so far
+                        if abs_idx in self.test_attempts:
+                            char_to_draw, is_correct = self.test_attempts[abs_idx]
+                            if not is_correct:
+                                draw_x_overlay = True
+                        
+                        # Handle incorrect standalone decimal point rendering rules
+                        if self.test_point_spoken and not self.test_point_correct and self.test_point_idx == abs_idx:
+                            char_to_draw = "."
+                            draw_x_overlay = True
                 
-            elif self.mode == "TEST":
-                draw.text((1, 0), "TEST MODE", fill="white")
-                draw.line((0, 11, 127, 11), fill="white")
+                # Execute pixel-level grid rendering calculations
+                cur_x = start_x + (i * char_width)
+                if char_to_draw != " ":
+                    draw.text((cur_x, y_pos), char_to_draw, fill="white")
                 
-                # The reference line always displays the full target segment uncensored
-                base_str = self.get_view_string(self.study_index, mask_past_fail=False)
-                draw.text((2, 16), base_str, fill="white")
-                draw.line((0, 29, 127, 29), fill="white")
-                
-                total_attempts = len(self.test_attempts)
-                max_visible = self.WINDOW_SIZE + 1
-                if total_attempts <= max_visible:
-                    visible_slice = self.test_attempts
-                else:
-                    visible_slice = self.test_attempts[-max_visible:]
+                if show_dot:
+                    # Draw decimal dot right between slots without triggering horizontal shifts
+                    draw.text((cur_x + 4, y_pos), ".", fill="white")
                     
-                start_x = 2
-                char_width = 6
-                y_pos = 38
-                
-                for i, (char, is_correct) in enumerate(visible_slice):
-                    cur_x = start_x + (i * char_width)
-                    draw.text((cur_x, y_pos), char, fill="white")
-                    
-                    if not is_correct:
-                        draw.line((cur_x, y_pos, cur_x + 4, y_pos + 8), fill="white")
-                        draw.line((cur_x + 4, y_pos, cur_x, y_pos + 8), fill="white")
+                if draw_x_overlay:
+                    draw.line((cur_x, y_pos, cur_x + 4, y_pos + 8), fill="white")
+                    draw.line((cur_x + 4, y_pos, cur_x, y_pos + 8), fill="white")
 
     def run_loop(self):
         """Primary thread processing orchestration gate."""

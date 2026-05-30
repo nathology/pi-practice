@@ -45,6 +45,7 @@ class GameEngine:
         self.study_index = 0           # Active operational pointer index tracking
         self.needs_refresh = True
         self.running = True
+        self.chord_active = False      # Protection flag tracking multi-button inputs
         
         # Test mode tracking structures
         self.test_attempts = {}        # Maps absolute_index -> (digit_char, is_correct)
@@ -66,6 +67,7 @@ class GameEngine:
         self.btn_right = Button(13, pull_up=True, bounce_time=0.05)
         
         # Bind events to local callback logic hooks
+        self.btn_menu.when_pressed = self.handle_menu_press
         self.btn_left.when_pressed = self.handle_left
         self.btn_right.when_pressed = self.handle_right
         self.btn_menu.when_held = self.handle_menu_long_press
@@ -94,11 +96,21 @@ class GameEngine:
         self.mode = "STUDY"
         self.needs_refresh = True
 
+    def handle_menu_press(self):
+        """Fires the instant the Center button transitions to down/low status."""
+        self.chord_active = False      # Reset flag state for the current press cycle
+
     def handle_left(self):
         """Fires when Left Button drops down."""
         if self.mode != "STUDY":
             return
-        step = self.WINDOW_SIZE if self.btn_menu.is_pressed else 1
+            
+        if self.btn_menu.is_pressed:
+            self.chord_active = True   # Mark chord as active to block the long-press event
+            step = self.WINDOW_SIZE
+        else:
+            step = 1
+            
         self.study_index = max(self.MIN_INDEX, self.study_index - step)
         self.needs_refresh = True
 
@@ -106,22 +118,31 @@ class GameEngine:
         """Fires when Right Button drops down."""
         if self.mode != "STUDY":
             return
-        step = self.WINDOW_SIZE if self.btn_menu.is_pressed else 1
+            
+        if self.btn_menu.is_pressed:
+            self.chord_active = True   # Mark chord as active to block the long-press event
+            step = self.WINDOW_SIZE
+        else:
+            step = 1
+            
         self.study_index = min(self.MAX_INDEX, self.study_index + step)
         self.needs_refresh = True
 
     def handle_menu_long_press(self):
-        """Fires when center menu key passes 1.5s threshold."""
+        """Fires when center menu key passes 1.5s threshold without chord activity."""
+        if self.chord_active:
+            print("ℹ️ Ignoring long press: Modifier chord action was actively deployed.")
+            return                     # Quietly break execution out of the mode swap logic
+
         if self.mode == "STUDY":
             self.mode = "TEST"
-            self.test_attempts = {}       # Reset tracking variables for fresh test run
+            self.test_attempts = {}       
             self.test_point_spoken = False
             self.test_point_correct = False
             self.first_fail_index = None  
             print(f"🚀 Entering TEST Mode at digit index: {self.study_index + self.WINDOW_SIZE}")
         elif self.mode == "TEST":
             self.mode = "STUDY"
-            # PERFECT PARITY: index and counters are preserved identically
             print("👈 Test exited. Keeping matching alignment frames.")
             
         self.needs_refresh = True
@@ -136,7 +157,6 @@ class GameEngine:
             if self.first_fail_index is not None:
                 break
 
-            # The target digit required is ALWAYS the one entering the right boundary edge
             current_test_idx = self.study_index + self.WINDOW_SIZE
             
             if current_test_idx >= len(self.pi_digits):
@@ -151,7 +171,7 @@ class GameEngine:
                 
                 if not is_correct:
                     self.first_fail_index = current_test_idx
-                    self.study_index += 1 # Advance so the wrong dot slides onto the display row
+                    self.study_index += 1 
                     break
                     
             elif word in self.word_map:
@@ -162,16 +182,13 @@ class GameEngine:
                 expected_digit = self.pi_digits[current_test_idx]
                 is_correct = (digit == expected_digit)
                 
-                # Cache user attempts by their unique absolute positions
                 self.test_attempts[current_test_idx] = (digit, is_correct)
                 self.needs_refresh = True
                 
                 if is_correct:
-                    # Advance view index instantly! Updates counter and typewrites text leftward
                     self.study_index += 1
                 else:
                     self.first_fail_index = current_test_idx
-                    # Advance index once so the failure digit slides directly into the visible right slot
                     self.study_index += 1
                     break
 
@@ -188,7 +205,6 @@ class GameEngine:
             mode_text = "STUDY MODE" if self.mode == "STUDY" else "TEST MODE"
             draw.text((1, 0), mode_text, fill="white")
             
-            # The cumulative digits count is identical in both execution branches
             memorized_count = self.study_index + self.WINDOW_SIZE
             draw.text((72, 0), f"Digits: {max(0, memorized_count)}", fill="white")
             draw.line((0, 11, 127, 11), fill="white")
@@ -204,7 +220,6 @@ class GameEngine:
                 draw_x_overlay = False
                 show_dot = False
                 
-                # Contextual decimal point rendering rules
                 if abs_idx == 0:
                     if self.mode == "STUDY":
                         show_dot = True
@@ -215,16 +230,13 @@ class GameEngine:
                     if self.mode == "STUDY":
                         char_to_draw = self.pi_digits[abs_idx]
                     elif self.mode == "TEST":
-                        # Pull items dynamically from session attempts history
                         if abs_idx in self.test_attempts:
                             char_to_draw, is_correct = self.test_attempts[abs_idx]
                             if not is_correct:
                                 draw_x_overlay = True
                         elif abs_idx < (self.study_index + self.WINDOW_SIZE):
-                            # Anything behind the right edge target was cleared successfully
                             char_to_draw = self.pi_digits[abs_idx]
                 
-                # Output calculated character frames onto the display plane
                 cur_x = start_x + (i * char_width)
                 if char_to_draw != " ":
                     draw.text((cur_x, y_pos), char_to_draw, fill="white")

@@ -24,33 +24,46 @@ def main():
     print("🤖 Loading lightweight acoustic speech model into memory...")
     model = Model(model_path)
     
-    sample_rate = 16000
-    recognizer = KaldiRecognizer(model, sample_rate)
+    # Vosk MUST receive 16000Hz mono data
+    VOSK_RATE = 16000
+    recognizer = KaldiRecognizer(model, VOSK_RATE)
     recognizer.SetWords(True) 
     
-    print("\n🚀 Opening microphone stream on device (hw:0,0). Speak numbers clearly!")
-    print("Press Ctrl+C to terminate the stream at any time.\n")
+    # Hardware constraints for googlevoicehat-soundcard overlay
+    HW_RATE = 44100
     
-    # Callback function optimized for the hardware's 2-channel payload layout
+    print(f"\n🚀 Opening microphone stream on device (hw:0,0) at native {HW_RATE}Hz...")
+    print("Speak numbers clearly into the mic! Press Ctrl+C to stop.\n")
+    
     def audio_callback(indata, frames, time, status):
         if status:
             print(f"⚠️ Audio Hardware Status Flag: {status}", file=sys.stderr)
             
-        # 1. Convert the raw buffer into a 2D numpy matrix [frames, channels]
-        # 'int16' matches our dtype definition below
+        # 1. Convert the raw buffer into a 2D numpy matrix [frames, 2 channels]
         audio_data = np.frombuffer(indata, dtype=np.int16).reshape(-1, 2)
         
-        # 2. Extract Channel 0 (the primary hardware I2S line)
+        # 2. Extract Channel 0 (Left channel data)
         left_channel = audio_data[:, 0]
         
-        # 3. Ship the isolated mono byte stream down to the underlying C++ engine
-        recognizer.AcceptWaveform(left_channel.tobytes())
+        # 3. Mathematically downsample from 44100Hz to 16000Hz
+        # Determine the target index array mapping
+        duration = len(left_channel) / HW_RATE
+        num_target_samples = int(duration * VOSK_RATE)
+        
+        src_indices = np.arange(len(left_channel))
+        target_indices = np.linspace(0, len(left_channel) - 1, num_target_samples)
+        
+        # Linearly interpolate the signal array into the new sample density
+        downsampled_data = np.interp(target_indices, src_indices, left_channel).astype(np.int16)
+        
+        # 4. Ship the perfectly downsampled mono stream to Vosk
+        recognizer.AcceptWaveform(downsampled_data.tobytes())
 
     try:
-        # We explicitly target device=0, channels=2 to match (hw:0,0) perfectly
+        # Open hardware stream at 44100Hz, stereo (channels=2)
         with sd.RawInputStream(device=0,
-                               samplerate=sample_rate, 
-                               blocksize=4000, 
+                               samplerate=HW_RATE, 
+                               blocksize=6000, # Clean buffer chunk size for 44.1kHz
                                dtype='int16', 
                                channels=2, 
                                callback=audio_callback):

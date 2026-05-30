@@ -11,5 +11,6 @@ dependencies = [
     "soundfile",
     "rpi.gpio",
     "luma.oled",
-    "gpiozero"
+    "gpiozero",
+    "spidev",
 ]

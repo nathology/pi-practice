@@ -24,13 +24,13 @@ def main():
     print("🤖 Loading lightweight acoustic speech model into memory...")
     model = Model(model_path)
     
-    # Vosk MUST receive 16000Hz mono data
+    # Vosk strictly demands a 16000Hz stream
     VOSK_RATE = 16000
     recognizer = KaldiRecognizer(model, VOSK_RATE)
     recognizer.SetWords(True) 
     
-    # Hardware constraints for googlevoicehat-soundcard overlay
-    HW_RATE = 44100
+    # Target the rigid hardware clock profile of the I2S microphone
+    HW_RATE = 48000
     
     print(f"\n🚀 Opening microphone stream on device (hw:0,0) at native {HW_RATE}Hz...")
     print("Speak numbers clearly into the mic! Press Ctrl+C to stop.\n")
@@ -45,25 +45,25 @@ def main():
         # 2. Extract Channel 0 (Left channel data)
         left_channel = audio_data[:, 0]
         
-        # 3. Mathematically downsample from 44100Hz to 16000Hz
-        # Determine the target index array mapping
+        # 3. Mathematically downsample from 48000Hz down to 16000Hz (Exactly a 3:1 factor reduction)
         duration = len(left_channel) / HW_RATE
         num_target_samples = int(duration * VOSK_RATE)
         
         src_indices = np.arange(len(left_channel))
         target_indices = np.linspace(0, len(left_channel) - 1, num_target_samples)
         
-        # Linearly interpolate the signal array into the new sample density
+        # Interpolate the signal array density cleanly
         downsampled_data = np.interp(target_indices, src_indices, left_channel).astype(np.int16)
         
-        # 4. Ship the perfectly downsampled mono stream to Vosk
+        # 4. Hand the downsampled 16kHz mono chunk to Vosk
         recognizer.AcceptWaveform(downsampled_data.tobytes())
 
     try:
-        # Open hardware stream at 44100Hz, stereo (channels=2)
+        # Open hardware stream at 48000Hz, stereo (channels=2)
+        # blocksize=6000 cuts perfectly divisible slices out of a 48kHz flow
         with sd.RawInputStream(device=0,
                                samplerate=HW_RATE, 
-                               blocksize=6000, # Clean buffer chunk size for 44.1kHz
+                               blocksize=6000, 
                                dtype='int16', 
                                channels=2, 
                                callback=audio_callback):

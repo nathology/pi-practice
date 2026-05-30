@@ -32,13 +32,11 @@ fi
 echo "🔗 Injecting native lgpio architecture hooks into virtual environment..."
 VENV_PACKAGES="$HOME/voice_env/lib/python3.13/site-packages"
 
-# Symlink the main Python wrapper module if not already present
 if [ ! -f "$VENV_PACKAGES/lgpio.py" ]; then
     ln -s /usr/lib/python3/dist-packages/lgpio.py "$VENV_PACKAGES/"
     echo "   -> Linked lgpio.py core wrapper"
 fi
 
-# Locate and dynamically symlink the architecture-specific shared C-library object
 SYS_SO_FILE=$(ls /usr/lib/python3/dist-packages/_lgpio.cpython-313-*.so 2>/dev/null || true)
 if [ -n "$SYS_SO_FILE" ]; then
     SO_FILENAME=$(basename "$SYS_SO_FILE")
@@ -50,27 +48,67 @@ else
     echo "⚠️ Warning: Native system _lgpio binary object not found. Hardware edge detection may fail."
 fi
 
-# 5. Prompt for system hardware configuration adjustments
+# 5. Fetch and unpack local offline speech recognition model
+echo "🤖 Checking for local offline speech recognition model..."
+if [ ! -d "model" ]; then
+    echo "   -> Model folder not found. Downloading lightweight Vosk acoustic model..."
+    wget -q --show-progress https://alphacephei.com/vosk/models/vosk-model-small-en-us-0.15.zip
+    
+    echo "   -> Unpacking model payload..."
+    unzip -q vosk-model-small-en-us-0.15.zip
+    mv vosk-model-small-en-us-0.15 model
+    rm vosk-model-small-en-us-0.15.zip
+    echo "✅ Speech recognition model asset verified and ready."
+else
+    echo "ℹ️ Existing offline speech model asset verified at ./model."
+fi
+
+# 6. Prompt for system hardware configuration adjustments
 echo ""
 echo "--------------------------------------------------------"
 echo "🛠️ Hardware Configuration Options"
 echo "--------------------------------------------------------"
-read -p "Do you want to optimize /boot/firmware/config.txt for the SPI OLED right now? (y/N): " -n 1 -r
+read -p "Do you want to check and optimize /boot/firmware/config.txt right now? (y/N): " -n 1 -r
 echo ""
 if [[ $REPLY =~ ^[Yy]$ ]]; then
+    # Create a unified backup before applying alterations
     sudo cp /boot/firmware/config.txt /boot/firmware/config.txt.bak
-    
+    echo "💾 Created a configuration backup at /boot/firmware/config.txt.bak"
+
+    NEEDS_REBOOT=false
+
+    # A. Check and apply SPI display overlay logic
     if ! grep -q "dtoverlay=spi0-1cs" /boot/firmware/config.txt; then
-        echo "Updating system device overlays..."
+        echo "   -> Injecting SPI OLED screen overlay..."
         sudo bash -c 'cat << EOF >> /boot/firmware/config.txt
 
 # --- Added by Pi-Practice Setup Automation ---
-# Force rebuild standard SPI device paths on boot for SH1106 OLED
 dtoverlay=spi0-1cs
 EOF'
-        echo "✅ Hardware overlay added. A system reboot will be required later."
+        NEEDS_REBOOT=true
     else
-        echo "ℹ️ SPI device overlay already present. Skipping file modification."
+        echo "ℹ️ SPI device overlay already present. Skipping..."
+    fi
+
+    # B. Check and apply I2S microphone bus configuration
+    if ! grep -q "dtoverlay=rpi-i2s-audio" /boot/firmware/config.txt; then
+        echo "   -> Injecting I2S generic microphone bus driver overlays..."
+        sudo bash -c 'cat << EOF >> /boot/firmware/config.txt
+
+# --- Added by Pi-Practice Audio Automation ---
+dtparam=i2s=on
+dtoverlay=rpi-i2s-audio
+EOF'
+        NEEDS_REBOOT=true
+    else
+        echo "ℹ️ I2S microphone hardware overlay already present. Skipping..."
+    fi
+
+    # C. Handle final messaging conditional on what changed
+    if [ "$NEEDS_REBOOT" = true ]; then
+        echo "✅ System hardware entries injected! A system reboot is required to activate overlays."
+    else
+        echo "✅ All hardware configuration profiles match requirements perfectly."
     fi
 fi
 
@@ -78,7 +116,12 @@ echo ""
 echo "--------------------------------------------------------"
 echo "🎉 Setup Script Execution Complete!"
 echo "--------------------------------------------------------"
-echo "Everything is primed. You can now run diagnostics completely WITHOUT sudo:"
-echo "python oled_hello.py"
-echo "python button_test.py"
+if [ "$NEEDS_REBOOT" = true ]; then
+    echo "⚠️  Please type: 'sudo reboot' to initialize your physical screen and mic."
+else
+    echo "Everything is primed. You can now run diagnostics entirely WITHOUT sudo:"
+    echo "python oled_hello.py"
+    echo "python button_test.py"
+    echo "python mic_test.py"
+fi
 echo ""

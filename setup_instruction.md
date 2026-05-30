@@ -56,5 +56,29 @@ sudo reboot
 Try a hello world on the screen
 
 '''bash
-~/voice_env/bin/python oled_hello.py
+~/voice_env/bin/python screen_test.py
 '''
+
+
+```
+sudo cp gamepi.service /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable gamepi.service
+```
+
+Instructions for managing the service now that it's going to launch
+automatically.
+
+```
+# check status
+sudo systemctl status gamepi.service
+
+# Watch spoken audio tokens register in real-time:
+journalctl -u gamepi.service -f
+
+# Kill the background app to run a manual script variation:
+sudo systemctl stop gamepi.service
+
+# Restart the game after running a git pull update:
+sudo systemctl restart gamepi.service
+```

@@ -9,5 +9,7 @@ description = "An offline voice-controlled Pi game for memorizing digits"
 dependencies = [
     "vosk",
     "soundfile",
-    "rpi.gpio"
+    "rpi.gpio",
+    "luma.oled",
+    "gpiozero"
 ]

@@ -53,6 +53,9 @@ EOF'
     fi
 fi
 
+# noahfitz@the-pi-of-pi:~/repo/pi-practice $ git config --global user.email "nate.fitzgerald@gmail.com"
+# noahfitz@the-pi-of-pi:~/repo/pi-practice $ git config --global user.name "Nathan Fitzgerald"
+
 echo ""
 echo "--------------------------------------------------------"
 echo "🎉 Setup Script Execution Complete!"
@@ -60,3 +63,4 @@ echo "--------------------------------------------------------"
 echo "To test your OLED screen panel using your virtual environment, run:"
 echo "sudo ~/voice_env/bin/python oled_hello.py"
 echo ""
+

@@ -17,7 +17,9 @@ sudo apt update && sudo apt install -y \
   libtiff-dev \
   libportaudio2 \
   alsa-utils \
-  python3-lgpio
+  python3-lgpio \
+  libportaudio2 \ 
+  libasound2-plugins 
 
 ```
 

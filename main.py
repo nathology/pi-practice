@@ -26,7 +26,7 @@ def audio_producer_callback(indata, frames, time_info, status):
 
 class GameEngine:
     def __init__(self):
-        # 1. Hardcoded Pi string baseline for tracking memory metrics (300 digits)
+        # 1. Baseline Pi string tracking memory metrics (300 digits)
         self.pi_digits = (
             "314159265358979323846264338327950288419716939937510582097494459230"
             "781640628620899862803482534211706798214808651328230664709384460955"
@@ -35,9 +35,14 @@ class GameEngine:
             "034861045432664821339360726024914127372458700660631558817488152092"
         )
         
-        # 2. State Machine Variables
-        self.mode = "SPLASH"  # Modes: SPLASH, STUDY, TEST
-        self.study_index = 0  # Starting window cursor index for study view
+        # 2. Layout Configuration Adjustments
+        self.WINDOW_SIZE = 20          # Expand viewing deck to 20 digits to fill screen
+        self.MIN_INDEX = -20           # Allows scrolling left until the screen is completely clear
+        self.MAX_INDEX = len(self.pi_digits) - self.WINDOW_SIZE
+        
+        # State Machine Variables
+        self.mode = "SPLASH"           # Modes: SPLASH, STUDY, TEST
+        self.study_index = 0           # Starts tracking normally at index 0
         self.needs_refresh = True
         self.running = True
         
@@ -93,11 +98,8 @@ class GameEngine:
         if self.mode != "STUDY":
             return
         
-        # If the Center/Menu button is held down while tapping this
-        if self.btn_menu.is_pressed:
-            self.study_index = max(0, self.study_index - 10)  # Scroll Page
-        else:
-            self.study_index = max(0, self.study_index - 1)   # Scroll Digit
+        step = self.WINDOW_SIZE if self.btn_menu.is_pressed else 1
+        self.study_index = max(self.MIN_INDEX, self.study_index - step)
         self.needs_refresh = True
 
     def handle_right(self):
@@ -105,11 +107,8 @@ class GameEngine:
         if self.mode != "STUDY":
             return
             
-        max_idx = len(self.pi_digits) - 10
-        if self.btn_menu.is_pressed:
-            self.study_index = min(max_idx, self.study_index + 10) # Scroll Page
-        else:
-            self.study_index = min(max_idx, self.study_index + 1)  # Scroll Digit
+        step = self.WINDOW_SIZE if self.btn_menu.is_pressed else 1
+        self.study_index = min(self.MAX_INDEX, self.study_index + step)
         self.needs_refresh = True
 
     def handle_menu_long_press(self):
@@ -117,8 +116,7 @@ class GameEngine:
         if self.mode == "STUDY":
             self.mode = "TEST"
             self.test_attempts = []
-            # Start testing the user on the digits directly following the visible study window
-            self.test_target_offset = self.study_index + 10
+            self.test_target_offset = self.study_index + self.WINDOW_SIZE
             print(f"🚀 Switching to TEST Mode. Target digit index starts at: {self.test_target_offset}")
         elif self.mode == "TEST":
             self.mode = "STUDY"
@@ -130,18 +128,29 @@ class GameEngine:
         """Tokenizes speech segments and scores accuracy against the target array."""
         words = text_chunk.split()
         for word in words:
-            digit = self.word_map.get(word)
-            if digit is not None:
-                current_test_idx = self.test_target_offset + len(self.test_attempts)
+            # Dynamically calculate current position by counting numeric entries only
+            actual_digits_attempted = sum(1 for char, _ in self.test_attempts if char != '.')
+            current_test_idx = self.test_target_offset + actual_digits_attempted
+            
+            if current_test_idx >= len(self.pi_digits):
+                break
+
+            # Handle the optional spoken decimal point
+            if word == "point":
+                # Correct only if Noah just finished the first digit ("3")
+                is_correct = (current_test_idx == 1)
+                self.test_attempts.append((".", is_correct))
+                self.needs_refresh = True
                 
-                # Check bounding limit against max string length
-                if current_test_idx >= len(self.pi_digits):
-                    break
+            # Handle standard numerical inputs
+            elif word in self.word_map:
+                if current_test_idx < 0:
+                    continue
                     
+                digit = self.word_map[word]
                 expected_digit = self.pi_digits[current_test_idx]
                 is_correct = (digit == expected_digit)
                 
-                # Commit the verification outcome to the state matrix
                 self.test_attempts.append((digit, is_correct))
                 self.needs_refresh = True
 
@@ -154,72 +163,62 @@ class GameEngine:
                 draw.text((20, 38), "🤖 Loading Vosk...", fill="white")
                 
             elif self.mode == "STUDY":
-                # Header Section
-                draw.text((0, 0), "MODE: STUDY", fill="white")
-                range_str = f"Idx: {self.study_index}-{self.study_index+9}"
-                draw.text((70, 0), range_str, fill="white")
+                draw.text((0, 0), "STUDY MODE", fill="white")
+                display_idx = max(0, self.study_index)
+                range_str = f"Idx: {display_idx}"
+                draw.text((80, 0), range_str, fill="white")
                 draw.line((0, 11, 127, 11), fill="white")
                 
-                # Render the 10 digits cleanly spaced out across the middle screen
-                visible_digits = self.pi_digits[self.study_index : self.study_index + 10]
+                if self.study_index < 0:
+                    blank_slots = abs(self.study_index)
+                    visible_digits = " " * blank_slots + self.pi_digits[0 : self.WINDOW_SIZE - blank_slots]
+                else:
+                    visible_digits = self.pi_digits[self.study_index : self.study_index + self.WINDOW_SIZE]
                 
-                # Formatting exception rule: display '3.' if looking at the absolute origin
-                display_string = ""
-                for idx, d in enumerate(visible_digits):
-                    if self.study_index == 0 and idx == 0:
-                        display_string += "3. "
-                    else:
-                        display_string += f"{d} "
-                        
-                draw.text((5, 28), display_string.strip(), fill="white")
+                draw.text((4, 28), visible_digits, fill="white")
                 
             elif self.mode == "TEST":
-                # Header Section
-                draw.text((0, 0), "MODE: TEST", fill="white")
+                draw.text((0, 0), "TEST MODE", fill="white")
                 draw.line((0, 11, 127, 11), fill="white")
                 
-                # Row 1: Draw the original study baseline sequence anchor text
-                base_digits = self.pi_digits[self.study_index : self.study_index + 10]
-                draw.text((0, 15), f"Base: {base_digits}", fill="white")
+                if self.study_index < 0:
+                    blank_slots = abs(self.study_index)
+                    base_digits = " " * blank_slots + self.pi_digits[0 : self.WINDOW_SIZE - blank_slots]
+                else:
+                    base_digits = self.pi_digits[self.study_index : self.study_index + self.WINDOW_SIZE]
                 
-                # Row 2: Draw user spoken responses horizontally. Max view width = 11 symbols.
-                # If Noah speaks more than 11 characters, slide the display window dynamically.
-                max_visible_test = 11
+                draw.text((4, 18), base_digits, fill="white")
+                draw.line((4, 30, 123, 30), fill="white") 
+                
+                # Slide the viewing window if characters exceed display limits
                 total_attempts = len(self.test_attempts)
-                
-                if total_attempts <= max_visible_test:
+                if total_attempts <= self.WINDOW_SIZE:
                     visible_slice = self.test_attempts
                 else:
-                    visible_slice = self.test_attempts[-max_visible_test:]
+                    visible_slice = self.test_attempts[-self.WINDOW_SIZE:]
                     
-                draw.text((0, 36), "Heard: ", fill="white")
-                
-                # Dynamically calculate coordinates to overlay an X over any errors
-                start_x = 42
-                char_width = 7
-                y_pos = 36
+                start_x = 4
+                char_width = 6
+                y_pos = 40
                 
                 for i, (char, is_correct) in enumerate(visible_slice):
                     cur_x = start_x + (i * char_width)
                     draw.text((cur_x, y_pos), char, fill="white")
                     
                     if not is_correct:
-                        # Draw a small bounding box X directly through the wrong number string character
-                        draw.line((cur_x, y_pos, cur_x + 5, y_pos + 8), fill="white")
-                        draw.line((cur_x + 5, y_pos, cur_x, y_pos + 8), fill="white")
+                        # Draw strikeout X directly over the failed entry
+                        draw.line((cur_x, y_pos, cur_x + 4, y_pos + 8), fill="white")
+                        draw.line((cur_x + 4, y_pos, cur_x, y_pos + 8), fill="white")
 
     def run_loop(self):
         """Primary thread processing orchestration gate."""
-        # Open hardware recording device 0 natively at 48000Hz Stereo parameters
         with sd.InputStream(device=0, samplerate=48000, channels=2, 
                             dtype='int16', blocksize=4800, 
                             callback=audio_producer_callback):
             
             print("\n🚀 System Initialized completely! Handheld engine running.")
-            print("Use hardware buttons or speak numbers to test. Press Ctrl+C to terminate.")
             
             while self.running:
-                # 1. Non-blocking audio queue consumption to maintain UI fluidness
                 try:
                     audio_data = audio_queue.get_nowait()
                     if self.mode == "TEST":
@@ -232,12 +231,10 @@ class GameEngine:
                 except queue.Empty:
                     pass
                 
-                # 2. Sequential frame update check to prevent flashing
                 if self.needs_refresh:
                     self.render_display()
                     self.needs_refresh = False
                     
-                # Balanced sleep cycle to prevent processor spikes
                 time.sleep(0.02)
 
 

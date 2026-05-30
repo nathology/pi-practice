@@ -44,3 +44,14 @@ chmod +x setup-pi.sh
 source setup-pi.sh
 '''
 
+reboot the machine to update any configs that were changed
+
+'''bash
+sudo reboot
+'''
+
+Try a hello world on the screen
+
+'''bash
+sudo -E ~/voice_env/bin/python oled_hello.py
+'''

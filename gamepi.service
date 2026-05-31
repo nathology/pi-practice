@@ -8,11 +8,11 @@ User=noahfitz
 WorkingDirectory=/home/noahfitz/repo/pi-practice
 ExecStart=/home/noahfitz/voice_env/bin/python main.py
 
-# Automatically restart the game if it encounters a random runtime crash
-Restart=on-failure
+# Force systemd to loop restart the app regardless of clean or dirty exit codes
+Restart=always
 RestartSec=3
 
-# Force Python's stdout/stderr streams to flush straight to system logs instantly
+# Ensure python logs aren't cached internally
 Environment=PYTHONUNBUFFERED=1
 
 [Install]

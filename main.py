@@ -11,6 +11,7 @@ from vosk import Model, KaldiRecognizer
 from luma.core.interface.serial import spi
 from luma.oled.device import sh1106
 from luma.core.render import canvas
+from PIL import ImageFont
 
 # Thread-safe container for incoming background audio packets
 audio_queue = queue.Queue()
@@ -26,8 +27,7 @@ def audio_producer_callback(indata, frames, time_info, status):
 
 class GameEngine:
     def __init__(self):
-        # 1. Baseline Pi string tracking memory metrics (1000 decimal digits)
-# 1. Baseline Pi string tracking memory metrics (1000 decimal digits)
+        # 1. Baseline Pi string tracking memory metrics (1000 CORRECT decimal digits)
         self.pi_digits = (
             "314159265358979323846264338327950288419716939937510582097494459230"
             "781640628620899862803482534211706798214808651328230664709384460955"
@@ -46,22 +46,22 @@ class GameEngine:
             "956286388235378759375195778185778053217122680661300192787661119590"
             "92164201989"
         )
-                
-        # 2. Layout Configuration Adjustments
-        self.WINDOW_SIZE = 20          # Base target digit slot width
-        self.MIN_INDEX = -20           # Fully clear screen margin bounds
+        
+        # 2. Layout Configuration Adjustments (Optimized for Larger Sizing)
+        self.WINDOW_SIZE = 12          # Scaled down from 20 to fit large text across 128px
+        self.MIN_INDEX = -12           # Matches window size for blank-slate clearing
         self.MAX_INDEX = len(self.pi_digits) - self.WINDOW_SIZE
         
         # State Machine Variables
-        self.mode = "SPLASH"           # Modes: SPLASH, STUDY, TEST
-        self.study_index = 0           # Active operational pointer index tracking
+        self.mode = "SPLASH"           
+        self.study_index = 0           
         self.needs_refresh = True
         self.running = True
-        self.chord_active = False      # Protection flag tracking multi-button inputs
+        self.chord_active = False      
         
         # Test mode tracking structures
-        self.test_attempts = {}        # Maps absolute_index -> (digit_char, is_correct)
-        self.first_fail_index = None   # Tracks the absolute index of Noah's first mistake
+        self.test_attempts = {}        
+        self.first_fail_index = None   
         self.test_point_spoken = False
         self.test_point_correct = False
         
@@ -78,13 +78,32 @@ class GameEngine:
         self.btn_menu = Button(6, pull_up=True, bounce_time=0.05, hold_time=1.5)
         self.btn_right = Button(13, pull_up=True, bounce_time=0.05)
         
-        # Bind events to local callback logic hooks
         self.btn_menu.when_pressed = self.handle_menu_press
         self.btn_left.when_pressed = self.handle_left
         self.btn_right.when_pressed = self.handle_right
         self.btn_menu.when_held = self.handle_menu_long_press
         
-        # 4. Initialize OLED Hardware Interface Panel
+        # 4. Load High-Legibility Scaled TrueType Fonts
+        print("🔤 Loading large TrueType fonts into memory...")
+        try:
+            self.font_header = ImageFont.truetype("DejaVuSans-Bold.ttf", 11)
+            self.font_main = ImageFont.truetype("DejaVuSansMono-Bold.ttf", 15)
+        except IOError:
+            try:
+                self.font_header = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 11)
+                self.font_main = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSansMono-Bold.ttf", 15)
+            except IOError:
+                print("⚠️ Warning: DejaVu TrueType fonts missing. Falling back to default styling.")
+                self.font_header = ImageFont.load_default()
+                self.font_main = ImageFont.load_default()
+
+        # Dynamically calculate the precise pixel width of 1 text slot using the loaded font
+        if hasattr(self.font_main, 'getbbox'):
+            self.char_width = self.font_main.getbbox("0")[2]
+        else:
+            self.char_width = 8  
+
+        # 5. Initialize OLED Hardware Interface Panel
         print("📺 Activating SPI SH1106 OLED Display Screen...")
         try:
             self.serial = spi(device=0, port=0, gpio_DC=24, gpio_RST=25)
@@ -95,7 +114,7 @@ class GameEngine:
 
         self.render_display()
 
-        # 5. Initialize Offline Audio Recognition Architecture
+        # 6. Initialize Offline Audio Recognition Architecture
         print("🤖 Loading machine learning speech files into memory...")
         if not os.path.exists("model"):
             print("❌ Error: 'model' directory missing.")
@@ -104,7 +123,6 @@ class GameEngine:
         self.recognizer = KaldiRecognizer(self.model, 16000)
         self.recognizer.SetWords(True)
         
-        # Transition out of splash mode into primary loop layout
         self.mode = "STUDY"
         self.needs_refresh = True
 
@@ -209,22 +227,22 @@ class GameEngine:
         with canvas(self.device) as draw:
             if self.mode == "SPLASH":
                 draw.rectangle((0, 0, 127, 63), outline="white", fill="black")
-                draw.text((24, 15), "THE PI OF PI", fill="white")
-                draw.text((20, 38), "🤖 Loading Vosk...", fill="white")
+                draw.text((15, 15), "THE PI OF PI", fill="white")
+                draw.text((12, 38), "🤖 Loading...", fill="white")
                 return
                 
-            # 1. RENDER PARITY HEADER SECTION
-            mode_text = "STUDY MODE" if self.mode == "STUDY" else "TEST MODE"
-            draw.text((1, 0), mode_text, fill="white")
+            # 1. RENDER TRUNCATED PARITY HEADER SECTION
+            mode_text = "STUDY" if self.mode == "STUDY" else "TEST"
+            draw.text((1, 0), mode_text, font=self.font_header, fill="white")
             
             memorized_count = self.study_index + self.WINDOW_SIZE
-            draw.text((72, 0), f"Digits: {max(0, memorized_count)}", fill="white")
-            draw.line((0, 11, 127, 11), fill="white")
+            draw.text((68, 0), f"Digits: {max(0, memorized_count)}", font=self.font_header, fill="white")
+            draw.line((0, 13, 127, 13), fill="white")
             
-            # 2. UNIFIED GRID ROW ENGINE (y=28)
-            start_x = 4
-            char_width = 6
-            y_pos = 28
+            # 2. LARGE UNIFIED GRID ROW ENGINE (y=26)
+            start_x = 6
+            y_pos = 26
+            dot_shift = 0
             
             for i in range(self.WINDOW_SIZE):
                 abs_idx = self.study_index + i
@@ -249,21 +267,23 @@ class GameEngine:
                         elif abs_idx < (self.study_index + self.WINDOW_SIZE):
                             char_to_draw = self.pi_digits[abs_idx]
                 
-                cur_x = start_x + (i * char_width)
+                cur_x = start_x + (i * self.char_width) + dot_shift
+                
                 if char_to_draw != " ":
-                    draw.text((cur_x, y_pos), char_to_draw, fill="white")
+                    draw.text((cur_x, y_pos), char_to_draw, font=self.font_main, fill="white")
                 
                 if show_dot:
-                    draw.text((cur_x + 4, y_pos), ".", fill="white")
+                    draw.text((cur_x + self.char_width - 2, y_pos), ".", font=self.font_main, fill="white")
+                    dot_shift += 6  
                     
                 if draw_sandwich_x:
-                    # Small 'X' Above the target slot frame bounding cell
-                    draw.line((cur_x, y_pos - 6, cur_x + 4, y_pos - 2), fill="white")
-                    draw.line((cur_x + 4, y_pos - 6, cur_x, y_pos - 2), fill="white")
+                    # Scaled 'X' Above the large character
+                    draw.line((cur_x + 1, y_pos - 8, cur_x + self.char_width - 2, y_pos - 3), fill="white")
+                    draw.line((cur_x + self.char_width - 2, y_pos - 8, cur_x + 1, y_pos - 3), fill="white")
                     
-                    # Small 'X' Below the target slot frame bounding cell
-                    draw.line((cur_x, y_pos + 10, cur_x + 4, y_pos + 14), fill="white")
-                    draw.line((cur_x + 4, y_pos + 10, cur_x, y_pos + 14), fill="white")
+                    # Scaled 'X' Below the large character
+                    draw.line((cur_x + 1, y_pos + 19, cur_x + self.char_width - 2, y_pos + 24), fill="white")
+                    draw.line((cur_x + self.char_width - 2, y_pos + 19, cur_x + 1, y_pos + 24), fill="white")
 
     def run_loop(self):
         """Primary thread processing orchestration gate."""

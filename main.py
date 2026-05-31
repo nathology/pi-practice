@@ -248,13 +248,9 @@ class GameEngine:
                 abs_idx = self.study_index + i
                 char_to_draw = " "
                 draw_sandwich_x = False
-                show_dot = False
                 
-                if abs_idx == 0:
-                    if self.mode == "STUDY":
-                        show_dot = True
-                    elif self.mode == "TEST" and self.test_point_spoken and self.test_point_correct:
-                        show_dot = True
+                # PARITY FIX: The structural decimal spacing layout rule is now identical across both modes
+                show_dot = (abs_idx == 0)
                 
                 if 0 <= abs_idx < len(self.pi_digits):
                     if self.mode == "STUDY":
@@ -306,9 +302,11 @@ class GameEngine:
                 except queue.Empty:
                     pass
                 
+                # CRITICAL THREAD RACE FIX: Reset the refresh flag immediately BEFORE drawing.
+                # This guarantees rapid-fire button clicks are caught rather than clobbered mid-render.
                 if self.needs_refresh:
-                    self.render_display()
                     self.needs_refresh = False
+                    self.render_display()
                     
                 time.sleep(0.02)
 

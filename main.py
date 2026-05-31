@@ -299,7 +299,7 @@ class GameEngine:
                     draw.line((cur_x + 1, y_pos + 19, cur_x + self.char_width - 2, y_pos + 24), fill="white")
                     draw.line((cur_x + self.char_width - 2, y_pos + 19, cur_x + 1, y_pos + 24), fill="white")
 
-    def run_loop(self):
+def run_loop(self):
         """Primary thread processing orchestration gate."""
         with sd.InputStream(device=0, samplerate=48000, channels=2, 
                             dtype='int16', blocksize=4800, 
@@ -308,24 +308,42 @@ class GameEngine:
             print("\n🚀 System Initialized completely! Handheld engine running.")
             
             while self.running:
-                try:
-                    audio_data = audio_queue.get_nowait()
-                    if self.mode == "TEST" and self.first_fail_index is None:
-                        if self.recognizer.AcceptWaveform(audio_data):
-                            res = json.loads(self.recognizer.Result())
-                            text = res.get("text", "")
-                            if text:
-                                print(f"🎙️ Captured speech tokens: {text}")
-                                self.process_voice_input(text)
-                except queue.Empty:
-                    pass
+                # -----------------------------------------------------------
+                # PATH A: STUDY MODE (Strict Isolation)
+                # -----------------------------------------------------------
+                if self.mode == "STUDY":
+                    # Instantly flush the queue to prevent RAM leaks.
+                    # No voice recognition logic or decoding is touched.
+                    while not audio_queue.empty():
+                        try:
+                            audio_queue.get_nowait()
+                        except queue.Empty:
+                            break
+
+                # -----------------------------------------------------------
+                # PATH B: TEST MODE (Active Voice Processing)
+                # -----------------------------------------------------------
+                elif self.mode == "TEST" and self.first_fail_index is None:
+                    while not audio_queue.empty():
+                        try:
+                            audio_data = audio_queue.get_nowait()
+                            if self.recognizer.AcceptWaveform(audio_data):
+                                res = json.loads(self.recognizer.Result())
+                                text = res.get("text", "")
+                                if text:
+                                    print(f"🎙️ Captured speech tokens: {text}")
+                                    self.process_voice_input(text)
+                        except queue.Empty:
+                            break
                 
+                # -----------------------------------------------------------
+                # DISPLAY REFRESH ENGINE
+                # -----------------------------------------------------------
                 if self.needs_refresh:
                     self.needs_refresh = False
                     self.render_display()
                     
-                time.sleep(0.02)
-
+                time.sleep(0.01)
 
 if __name__ == "__main__":
     engine = None

@@ -28,7 +28,7 @@ class GameEngine:
     def __init__(self):
         # 1. Baseline Pi string tracking memory metrics (1000 decimal digits)
         self.pi_digits = (
-            "3.141592653589793238462643383279" 
+            "3141592653589793238462643383279" 
             "502884197169399375105820974944" 
             "592307816406286208998628034825" 
             "342117067982148086513282306647" 

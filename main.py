@@ -28,23 +28,24 @@ class GameEngine:
     def __init__(self):
         # 1. Baseline Pi string tracking memory metrics (1000 decimal digits)
         self.pi_digits = (
-            "3141592653589793238462643383279" 
-            "502884197169399375105820974944" 
-            "592307816406286208998628034825" 
-            "342117067982148086513282306647" 
-            "093844609550582231725359408128" 
-            "481117450284102701938521105559" 
-            "644622948954930381964428810975" 
-            "665933446128475648233786783165" 
-            "271201909145648566923460348610" 
-            "454326648213393607260249141273" 
-            "724587006606315588174881520920" 
-            "962829254091715364367892590360" 
-            "011330530548820466521384146951" 
-            "941511609433057270365759591953" 
-            "092186117381932611793105118548" 
+            "314159265358979323846264338327950288419716939937510582097494459230"
+            "781640628620899862803482534211706798214808651328230664709384460955"
+            "058223172535940812848111745028410270193852110555964462294895493038"
+            "196442881097566593344612847564823378678316527120190914564856692346"
+            "034861045432664821339360726024914127372458700660631558817488152092"
+            "096282925409171536437892590360011330530548820466521384146951941511"
+            "609433057270365759591953092186117381932611793105118548074462379962"
+            "749567351885752724891227938183011949129833673362440656643086021394"
+            "946395224737190702179860943702770539217176293176752384674818467669"
+            "405132000568127145263560827785771342757789609173637178721468440901"
+            "224953430146549585371050792279689258923542019956112129021960864034"
+            "418159813629774771309960518707211349999998372978049951059731732816"
+            "096318595024459455346908302642522308253344685035261931188171010003"
+            "137838752886587533208381420617177669147303598253490428755468731159"
+            "562863882353787593751957781857780532171226806613001927876611195909"
+            "2164201989"
         )
-
+        
         # 2. Layout Configuration Adjustments
         self.WINDOW_SIZE = 20          # Base target digit slot width
         self.MIN_INDEX = -20           # Fully clear screen margin bounds
@@ -108,7 +109,7 @@ class GameEngine:
 
     def handle_menu_press(self):
         """Fires the instant the Center button transitions to down/low status."""
-        self.chord_active = False      # Reset flag state for the current press cycle
+        self.chord_active = False      
 
     def handle_left(self):
         """Fires when Left Button drops down."""
@@ -116,7 +117,7 @@ class GameEngine:
             return
             
         if self.btn_menu.is_pressed:
-            self.chord_active = True   # Mark chord as active to block the long-press event
+            self.chord_active = True   
             step = self.WINDOW_SIZE
         else:
             step = 1
@@ -130,7 +131,7 @@ class GameEngine:
             return
             
         if self.btn_menu.is_pressed:
-            self.chord_active = True   # Mark chord as active to block the long-press event
+            self.chord_active = True   
             step = self.WINDOW_SIZE
         else:
             step = 1
@@ -142,7 +143,7 @@ class GameEngine:
         """Fires when center menu key passes 1.5s threshold without chord activity."""
         if self.chord_active:
             print("ℹ️ Ignoring long press: Modifier chord action was actively deployed.")
-            return                     # Quietly break execution out of the mode swap logic
+            return                     
 
         if self.mode == "STUDY":
             self.mode = "TEST"
@@ -227,7 +228,7 @@ class GameEngine:
             for i in range(self.WINDOW_SIZE):
                 abs_idx = self.study_index + i
                 char_to_draw = " "
-                draw_x_overlay = False
+                draw_sandwich_x = False
                 show_dot = False
                 
                 if abs_idx == 0:
@@ -243,7 +244,7 @@ class GameEngine:
                         if abs_idx in self.test_attempts:
                             char_to_draw, is_correct = self.test_attempts[abs_idx]
                             if not is_correct:
-                                draw_x_overlay = True
+                                draw_sandwich_x = True
                         elif abs_idx < (self.study_index + self.WINDOW_SIZE):
                             char_to_draw = self.pi_digits[abs_idx]
                 
@@ -254,9 +255,14 @@ class GameEngine:
                 if show_dot:
                     draw.text((cur_x + 4, y_pos), ".", fill="white")
                     
-                if draw_x_overlay:
-                    draw.line((cur_x, y_pos, cur_x + 4, y_pos + 8), fill="white")
-                    draw.line((cur_x + 4, y_pos, cur_x, y_pos + 8), fill="white")
+                if draw_sandwich_x:
+                    # Small 'X' Above the target slot frame bounding cell
+                    draw.line((cur_x, y_pos - 6, cur_x + 4, y_pos - 2), fill="white")
+                    draw.line((cur_x + 4, y_pos - 6, cur_x, y_pos - 2), fill="white")
+                    
+                    # Small 'X' Below the target slot frame bounding cell
+                    draw.line((cur_x, y_pos + 10, cur_x + 4, y_pos + 14), fill="white")
+                    draw.line((cur_x + 4, y_pos + 10, cur_x, y_pos + 14), fill="white")
 
     def run_loop(self):
         """Primary thread processing orchestration gate."""
@@ -295,4 +301,6 @@ if __name__ == "__main__":
         print("\n🧹 Intercepting shutdown sequence signal...")
     finally:
         print("🔒 Releasing pin configurations safely. Goodbye!")
+        if engine and hasattr(engine, 'device'):
+            engine.device.clear()
         GPIO.cleanup()

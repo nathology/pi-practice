@@ -48,8 +48,8 @@ class GameEngine:
         )
         
         # 2. Layout Configuration Adjustments (Optimized for Larger Sizing)
-        self.WINDOW_SIZE = 12          # Scaled down from 20 to fit large text across 128px
-        self.MIN_INDEX = -12           # Matches window size for blank-slate clearing
+        self.WINDOW_SIZE = 12          
+        self.MIN_INDEX = -12           
         self.MAX_INDEX = len(self.pi_digits) - self.WINDOW_SIZE
         
         # State Machine Variables
@@ -125,6 +125,22 @@ class GameEngine:
         
         self.mode = "STUDY"
         self.needs_refresh = True
+
+    def get_absolute_x(self, abs_idx):
+        """Computes a fixed, un-jerkable absolute pixel offset from index 0."""
+        if abs_idx <= 0:
+            return abs_idx * self.char_width
+            
+        # Base translation coordinates
+        x = abs_idx * self.char_width
+        x += 6  # Structural padding for the static dot next to the leading 3
+        
+        # Break up visual flow into pristine 10-digit chunks after the decimal point
+        if abs_idx > 1:
+            num_spaces = (abs_idx - 1) // 10
+            x += num_spaces * 7  # Inject 7 pixels of whitespace padding per block boundary
+            
+        return x
 
     def handle_menu_press(self):
         """Fires the instant the Center button transitions to down/low status."""
@@ -239,17 +255,19 @@ class GameEngine:
             draw.text((68, 0), f"Digits: {max(0, memorized_count)}", font=self.font_header, fill="white")
             draw.line((0, 13, 127, 13), fill="white")
             
-            # 2. LARGE UNIFIED GRID ROW ENGINE (y=26)
+            # 2. LARGE VIEWPORT-MAPPED GRID ROW ENGINE (y=26)
             start_x = 6
             y_pos = 26
-            dot_shift = 0
+            
+            # Establish the baseline coordinate of our left camera window boundary
+            window_left_x = self.get_absolute_x(self.study_index)
             
             for i in range(self.WINDOW_SIZE):
                 abs_idx = self.study_index + i
                 char_to_draw = " "
                 draw_sandwich_x = False
                 
-                # PARITY FIX: The structural decimal spacing layout rule is now identical across both modes
+                # PARITY ANCHOR: The dot space remains permanently reserved in both modes
                 show_dot = (abs_idx == 0)
                 
                 if 0 <= abs_idx < len(self.pi_digits):
@@ -263,14 +281,14 @@ class GameEngine:
                         elif abs_idx < (self.study_index + self.WINDOW_SIZE):
                             char_to_draw = self.pi_digits[abs_idx]
                 
-                cur_x = start_x + (i * self.char_width) + dot_shift
+                # Transform absolute world coordinate to local screen pixel coordinate
+                cur_x = start_x + self.get_absolute_x(abs_idx) - window_left_x
                 
                 if char_to_draw != " ":
                     draw.text((cur_x, y_pos), char_to_draw, font=self.font_main, fill="white")
                 
                 if show_dot:
                     draw.text((cur_x + self.char_width - 2, y_pos), ".", font=self.font_main, fill="white")
-                    dot_shift += 6  
                     
                 if draw_sandwich_x:
                     # Scaled 'X' Above the large character
@@ -302,8 +320,6 @@ class GameEngine:
                 except queue.Empty:
                     pass
                 
-                # CRITICAL THREAD RACE FIX: Reset the refresh flag immediately BEFORE drawing.
-                # This guarantees rapid-fire button clicks are caught rather than clobbered mid-render.
                 if self.needs_refresh:
                     self.needs_refresh = False
                     self.render_display()

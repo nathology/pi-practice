@@ -3,6 +3,7 @@ import sys
 import json
 import time
 import queue
+import threading
 import numpy as np
 import RPi.GPIO as GPIO
 from gpiozero import Button
@@ -27,7 +28,10 @@ def audio_producer_callback(indata, frames, time_info, status):
 
 class GameEngine:
     def __init__(self):
-        # 1. Baseline Pi string tracking memory metrics (1000 CORRECT decimal digits)
+        # 1. Thread Synchronization Lock (Prevents state mutation mid-render)
+        self.lock = threading.Lock()
+        
+        # 2. Baseline Pi string tracking memory metrics (1000 CORRECT decimal digits)
         self.pi_digits = (
             "314159265358979323846264338327950288419716939937510582097494459230"
             "781640628620899862803482534211706798214808651328230664709384460955"
@@ -47,7 +51,7 @@ class GameEngine:
             "92164201989"
         )
         
-        # 2. Layout Configuration Adjustments (Optimized for Larger Sizing)
+        # 3. Layout Configuration Adjustments (Optimized for Larger Sizing)
         self.WINDOW_SIZE = 12          
         self.MIN_INDEX = -12           
         self.MAX_INDEX = len(self.pi_digits) - self.WINDOW_SIZE
@@ -72,18 +76,18 @@ class GameEngine:
             "nine": "9"
         }
 
-        # 3. Initialize Hardware Buttons via gpiozero
+        # 4. Initialize Hardware Buttons via gpiozero (Tuned 30ms Debounce Window)
         print("🎮 Connecting tactile switches to GPIO registers...")
-        self.btn_left = Button(5, pull_up=True, bounce_time=0.05)
-        self.btn_menu = Button(6, pull_up=True, bounce_time=0.05, hold_time=1.5)
-        self.btn_right = Button(13, pull_up=True, bounce_time=0.05)
+        self.btn_left = Button(5, pull_up=True, bounce_time=0.03)
+        self.btn_menu = Button(6, pull_up=True, bounce_time=0.03, hold_time=1.5)
+        self.btn_right = Button(13, pull_up=True, bounce_time=0.03)
         
         self.btn_menu.when_pressed = self.handle_menu_press
         self.btn_left.when_pressed = self.handle_left
         self.btn_right.when_pressed = self.handle_right
         self.btn_menu.when_held = self.handle_menu_long_press
         
-        # 4. Load High-Legibility Scaled TrueType Fonts
+        # 5. Load High-Legibility Scaled TrueType Fonts
         print("🔤 Loading large TrueType fonts into memory...")
         try:
             self.font_header = ImageFont.truetype("DejaVuSans-Bold.ttf", 11)
@@ -97,13 +101,12 @@ class GameEngine:
                 self.font_header = ImageFont.load_default()
                 self.font_main = ImageFont.load_default()
 
-        # Dynamically calculate the precise pixel width of 1 text slot using the loaded font
         if hasattr(self.font_main, 'getbbox'):
             self.char_width = self.font_main.getbbox("0")[2]
         else:
             self.char_width = 8  
 
-        # 5. Initialize OLED Hardware Interface Panel
+        # 6. Initialize OLED Hardware Interface Panel
         print("📺 Activating SPI SH1106 OLED Display Screen...")
         try:
             self.serial = spi(device=0, port=0, gpio_DC=24, gpio_RST=25)
@@ -114,7 +117,7 @@ class GameEngine:
 
         self.render_display()
 
-        # 6. Initialize Offline Audio Recognition Architecture
+        # 7. Initialize Offline Audio Recognition Architecture
         print("🤖 Loading machine learning speech files into memory...")
         if not os.path.exists("model"):
             print("❌ Error: 'model' directory missing.")
@@ -131,175 +134,176 @@ class GameEngine:
         if abs_idx <= 0:
             return abs_idx * self.char_width
             
-        # Base translation coordinates
         x = abs_idx * self.char_width
-        x += 6  # Structural padding for the static dot next to the leading 3
+        x += 6  
         
-        # Break up visual flow into pristine 10-digit chunks after the decimal point
         if abs_idx > 1:
             num_spaces = (abs_idx - 1) // 10
-            x += num_spaces * 7  # Inject 7 pixels of whitespace padding per block boundary
+            x += num_spaces * 7  
             
         return x
 
     def handle_menu_press(self):
         """Fires the instant the Center button transitions to down/low status."""
-        self.chord_active = False      
+        with self.lock:
+            self.chord_active = False      
 
     def handle_left(self):
         """Fires when Left Button drops down."""
-        if self.mode != "STUDY":
-            return
-            
-        if self.btn_menu.is_pressed:
-            self.chord_active = True   
-            step = self.WINDOW_SIZE
-        else:
-            step = 1
-            
-        self.study_index = max(self.MIN_INDEX, self.study_index - step)
-        self.needs_refresh = True
+        with self.lock:
+            if self.mode != "STUDY":
+                return
+                
+            if self.btn_menu.is_pressed:
+                self.chord_active = True   
+                step = self.WINDOW_SIZE
+            else:
+                step = 1
+                
+            self.study_index = max(self.MIN_INDEX, self.study_index - step)
+            self.needs_refresh = True
 
     def handle_right(self):
         """Fires when Right Button drops down."""
-        if self.mode != "STUDY":
-            return
-            
-        if self.btn_menu.is_pressed:
-            self.chord_active = True   
-            step = self.WINDOW_SIZE
-        else:
-            step = 1
-            
-        self.study_index = min(self.MAX_INDEX, self.study_index + step)
-        self.needs_refresh = True
+        with self.lock:
+            if self.mode != "STUDY":
+                return
+                
+            if self.btn_menu.is_pressed:
+                self.chord_active = True   
+                step = self.WINDOW_SIZE
+            else:
+                step = 1
+                
+            self.study_index = min(self.MAX_INDEX, self.study_index + step)
+            self.needs_refresh = True
 
     def handle_menu_long_press(self):
         """Fires when center menu key passes 1.5s threshold without chord activity."""
-        if self.chord_active:
-            print("ℹ️ Ignoring long press: Modifier chord action was actively deployed.")
-            return                     
+        with self.lock:
+            if self.chord_active:
+                print("ℹ️ Ignoring long press: Modifier chord action was actively deployed.")
+                return                     
 
-        if self.mode == "STUDY":
-            self.mode = "TEST"
-            self.test_attempts = {}       
-            self.test_point_spoken = False
-            self.test_point_correct = False
-            self.first_fail_index = None  
-            print(f"🚀 Entering TEST Mode at digit index: {self.study_index + self.WINDOW_SIZE}")
-        elif self.mode == "TEST":
-            self.mode = "STUDY"
-            print("👈 Test exited. Keeping matching alignment frames.")
-            
-        self.needs_refresh = True
+            if self.mode == "STUDY":
+                self.mode = "TEST"
+                self.test_attempts = {}       
+                self.test_point_spoken = False
+                self.test_point_correct = False
+                self.first_fail_index = None  
+                print(f"🚀 Entering TEST Mode at digit index: {self.study_index + self.WINDOW_SIZE}")
+            elif self.mode == "TEST":
+                self.mode = "STUDY"
+                print("👈 Test exited. Keeping matching alignment frames.")
+                
+            self.needs_refresh = True
 
     def process_voice_input(self, text_chunk):
         """Tokenizes speech segments and scores accuracy against target array."""
-        if self.first_fail_index is not None:
-            return
-
-        words = text_chunk.split()
-        for word in words:
+        with self.lock:
             if self.first_fail_index is not None:
-                break
+                return
 
-            current_test_idx = self.study_index + self.WINDOW_SIZE
-            
-            if current_test_idx >= len(self.pi_digits):
-                break
+            words = text_chunk.split()
+            for word in words:
+                if self.first_fail_index is not None:
+                    break
 
-            if word == "point":
-                is_correct = (current_test_idx == 1)
-                self.test_point_spoken = True
-                self.test_point_correct = is_correct
-                self.test_attempts[current_test_idx] = (".", is_correct)
-                self.needs_refresh = True
+                current_test_idx = self.study_index + self.WINDOW_SIZE
                 
-                if not is_correct:
-                    self.first_fail_index = current_test_idx
-                    self.study_index += 1 
+                if current_test_idx >= len(self.pi_digits):
                     break
+
+                if word == "point":
+                    is_correct = (current_test_idx == 1)
+                    self.test_point_spoken = True
+                    self.test_point_correct = is_correct
+                    self.test_attempts[current_test_idx] = (".", is_correct)
+                    self.needs_refresh = True
                     
-            elif word in self.word_map:
-                if current_test_idx < 0:
-                    continue
+                    if not is_correct:
+                        self.first_fail_index = current_test_idx
+                        self.study_index += 1 
+                        break
+                        
+                elif word in self.word_map:
+                    if current_test_idx < 0:
+                        continue
+                        
+                    digit = self.word_map[word]
+                    expected_digit = self.pi_digits[current_test_idx]
+                    is_correct = (digit == expected_digit)
                     
-                digit = self.word_map[word]
-                expected_digit = self.pi_digits[current_test_idx]
-                is_correct = (digit == expected_digit)
-                
-                self.test_attempts[current_test_idx] = (digit, is_correct)
-                self.needs_refresh = True
-                
-                if is_correct:
-                    self.study_index += 1
-                else:
-                    self.first_fail_index = current_test_idx
-                    self.study_index += 1
-                    break
+                    self.test_attempts[current_test_idx] = (digit, is_correct)
+                    self.needs_refresh = True
+                    
+                    if is_correct:
+                        self.study_index += 1
+                    else:
+                        self.first_fail_index = current_test_idx
+                        self.study_index += 1
+                        break
 
     def render_display(self):
         """Clears canvas buffers and drafts UI assets onto glass matrix geometry."""
-        with canvas(self.device) as draw:
-            if self.mode == "SPLASH":
-                draw.rectangle((0, 0, 127, 63), outline="white", fill="black")
-                draw.text((15, 15), "THE PI OF PI", fill="white")
-                draw.text((12, 38), "🤖 Loading...", fill="white")
-                return
+        with self.lock:
+            with canvas(self.device) as draw:
+                if self.mode == "SPLASH":
+                    draw.rectangle((0, 0, 127, 63), outline="white", fill="black")
+                    draw.text((15, 15), "THE PI OF PI", fill="white")
+                    draw.text((12, 38), "🤖 Loading...", fill="white")
+                    return
+                    
+                # 1. RENDER TRUNCATED PARITY HEADER SECTION
+                mode_text = "STUDY" if self.mode == "STUDY" else "TEST"
+                draw.text((1, 0), mode_text, font=self.font_header, fill="white")
                 
-            # 1. RENDER TRUNCATED PARITY HEADER SECTION
-            mode_text = "STUDY" if self.mode == "STUDY" else "TEST"
-            draw.text((1, 0), mode_text, font=self.font_header, fill="white")
-            
-            memorized_count = self.study_index + self.WINDOW_SIZE
-            draw.text((68, 0), f"Digits: {max(0, memorized_count)}", font=self.font_header, fill="white")
-            draw.line((0, 13, 127, 13), fill="white")
-            
-            # 2. LARGE VIEWPORT-MAPPED GRID ROW ENGINE (y=26)
-            start_x = 6
-            y_pos = 26
-            
-            # Establish the baseline coordinate of our left camera window boundary
-            window_left_x = self.get_absolute_x(self.study_index)
-            
-            for i in range(self.WINDOW_SIZE):
-                abs_idx = self.study_index + i
-                char_to_draw = " "
-                draw_sandwich_x = False
+                memorized_count = self.study_index + self.WINDOW_SIZE
+                draw.text((68, 0), f"Digits: {max(0, memorized_count)}", font=self.font_header, fill="white")
+                draw.line((0, 13, 127, 13), fill="white")
                 
-                # PARITY ANCHOR: The dot space remains permanently reserved in both modes
-                show_dot = (abs_idx == 0)
+                # 2. LARGE VIEWPORT-MAPPED GRID ROW ENGINE (y=26)
+                start_x = 6
+                y_pos = 26
                 
-                if 0 <= abs_idx < len(self.pi_digits):
-                    if self.mode == "STUDY":
-                        char_to_draw = self.pi_digits[abs_idx]
-                    elif self.mode == "TEST":
-                        if abs_idx in self.test_attempts:
-                            char_to_draw, is_correct = self.test_attempts[abs_idx]
-                            if not is_correct:
-                                draw_sandwich_x = True
-                        elif abs_idx < (self.study_index + self.WINDOW_SIZE):
+                window_left_x = self.get_absolute_x(self.study_index)
+                
+                for i in range(self.WINDOW_SIZE):
+                    abs_idx = self.study_index + i
+                    char_to_draw = " "
+                    draw_sandwich_x = False
+                    
+                    show_dot = (abs_idx == 0)
+                    
+                    if 0 <= abs_idx < len(self.pi_digits):
+                        if self.mode == "STUDY":
                             char_to_draw = self.pi_digits[abs_idx]
-                
-                # Transform absolute world coordinate to local screen pixel coordinate
-                cur_x = start_x + self.get_absolute_x(abs_idx) - window_left_x
-                
-                if char_to_draw != " ":
-                    draw.text((cur_x, y_pos), char_to_draw, font=self.font_main, fill="white")
-                
-                if show_dot:
-                    draw.text((cur_x + self.char_width - 2, y_pos), ".", font=self.font_main, fill="white")
+                        elif self.mode == "TEST":
+                            if abs_idx in self.test_attempts:
+                                char_to_draw, is_correct = self.test_attempts[abs_idx]
+                                if not is_correct:
+                                    draw_sandwich_x = True
+                            elif abs_idx < (self.study_index + self.WINDOW_SIZE):
+                                char_to_draw = self.pi_digits[abs_idx]
                     
-                if draw_sandwich_x:
-                    # Scaled 'X' Above the large character
-                    draw.line((cur_x + 1, y_pos - 8, cur_x + self.char_width - 2, y_pos - 3), fill="white")
-                    draw.line((cur_x + self.char_width - 2, y_pos - 8, cur_x + 1, y_pos - 3), fill="white")
+                    cur_x = start_x + self.get_absolute_x(abs_idx) - window_left_x
                     
-                    # Scaled 'X' Below the large character
-                    draw.line((cur_x + 1, y_pos + 19, cur_x + self.char_width - 2, y_pos + 24), fill="white")
-                    draw.line((cur_x + self.char_width - 2, y_pos + 19, cur_x + 1, y_pos + 24), fill="white")
+                    if char_to_draw != " ":
+                        draw.text((cur_x, y_pos), char_to_draw, font=self.font_main, fill="white")
+                    
+                    if show_dot:
+                        draw.text((cur_x + self.char_width - 2, y_pos), ".", font=self.font_main, fill="white")
+                        
+                    if draw_sandwich_x:
+                        # Scaled 'X' Above the large character
+                        draw.line((cur_x + 1, y_pos - 8, cur_x + self.char_width - 2, y_pos - 3), fill="white")
+                        draw.line((cur_x + self.char_width - 2, y_pos - 8, cur_x + 1, y_pos - 3), fill="white")
+                        
+                        # Scaled 'X' Below the large character
+                        draw.line((cur_x + 1, y_pos + 19, cur_x + self.char_width - 2, y_pos + 24), fill="white")
+                        draw.line((cur_x + self.char_width - 2, y_pos + 19, cur_x + 1, y_pos + 24), fill="white")
 
-def run_loop(self):
+    def run_loop(self):
         """Primary thread processing orchestration gate."""
         with sd.InputStream(device=0, samplerate=48000, channels=2, 
                             dtype='int16', blocksize=4800, 
@@ -312,8 +316,6 @@ def run_loop(self):
                 # PATH A: STUDY MODE (Strict Isolation)
                 # -----------------------------------------------------------
                 if self.mode == "STUDY":
-                    # Instantly flush the queue to prevent RAM leaks.
-                    # No voice recognition logic or decoding is touched.
                     while not audio_queue.empty():
                         try:
                             audio_queue.get_nowait()
@@ -344,6 +346,7 @@ def run_loop(self):
                     self.render_display()
                     
                 time.sleep(0.01)
+
 
 if __name__ == "__main__":
     engine = None
